@@ -1,0 +1,22 @@
+# Java build files
+target/
+*.class
+
+# IDE files
+.idea/
+.vscode/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Database files — keep out of this upload
+backend/src/main/resources/data.sql
+backend/src/main/resources/schema.sql
+# Generated and backup files
+*.zip
+*.bak
