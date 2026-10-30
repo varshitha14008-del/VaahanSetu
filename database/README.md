@@ -21,25 +21,129 @@ Tables & Java Models* document).
   * `TIMESTAMP` / `TIMESTAMPTZ`
   * `plpgsql` triggers
 
-## Apply the schema
+## Running the database
 
-From `psql` (as a superuser):
+You have two options. Pick **ONE** for the whole team — don't mix.
 
-```bash
-psql -h <host> -p <port> -U postgres -d postgres -c "CREATE DATABASE vaahansetu;"
-psql -h <host> -p <port> -U postgres -d vaahansetu -f database/vaahansetu_schema.sql
-psql -h <host> -p <port> -U postgres -d vaahansetu -f database/vaahansetu_seed.sql
-# optional verification:
-psql -h <host> -p <port> -U postgres -d vaahansetu -f database/vaahansetu_constraint_tests.sql
-```
+### Option A — Each person runs PostgreSQL locally
 
-Or in one line:
+Best for independent development. Each teammate gets their own private
+copy of the database at `localhost:5432`. No shared password to manage.
+
+**Mac / Linux / WSL (one command):**
 
 ```bash
-psql -h <host> -p <port> -U postgres -d vaahansetu \
-  -f database/vaahansetu_schema.sql \
-  -f database/vaahansetu_seed.sql
+git clone https://github.com/varshitha14008-del/VaahanSetu.git
+cd VaahanSetu
+bash database/setup/setup.sh
 ```
+
+The script auto-detects Docker or native PostgreSQL, spins up a fresh
+Postgres 16, applies the schema + seed, and prints the JDBC URL.
+
+**Windows:** install PostgreSQL from https://www.postgresql.org/download/windows/
+(includes `psql`), then run:
+
+```powershell
+git clone https://github.com/varshitha14008-del/VaahanSetu.git
+cd VaahanSetu
+psql -U postgres -c "CREATE DATABASE vaahansetu;"
+psql -U postgres -d vaahansetu -f database\vaahansetu_schema.sql
+psql -U postgres -d vaahansetu -f database\vaahansetu_seed.sql
+```
+
+Local connection details (same for everyone):
+
+| Field | Value |
+|-------|-------|
+| Host | `localhost` |
+| Port | `5432` |
+| Database | `vaahansetu` |
+| Username | `postgres` (superuser) **or** `vaahansetu_app` (app role) |
+| Password | `postgres` (superuser, Docker) **or** `vaahansetu_dev_pwd` (app role) |
+| JDBC URL | `jdbc:postgresql://localhost:5432/vaahansetu` |
+
+### Option B — Shared cloud PostgreSQL on Neon (recommended for team demos)
+
+One shared database the whole team connects to. Best when everyone's app
+needs to see the same data at the same time (e.g. for a final demo).
+
+**One-time setup (one person does this, then shares details privately):**
+
+1. Sign up at **https://neon.tech** (use GitHub OAuth — one click).
+2. Click **Create new project**:
+   - Project name: `vaahansetu`
+   - Database name: `vaahansetu` (change from the default `neondb`)
+   - Region: closest to your team (e.g. `ap-south-1` Mumbai for India)
+   - Postgres version: 16
+3. After creating, copy the **connection string** shown on the dashboard.
+   It looks like:
+   ```
+   postgres://vaahansetu_owner:xxxxxxxx@ep-xxx.us-east-2.aws.neon.tech/vaahansetu?sslmode=require
+   ```
+4. Apply the schema + seed using the helper script:
+
+   **Mac / Linux / WSL:**
+   ```bash
+   bash database/setup/apply_to_cloud.sh "postgres://vaahansetu_owner:xxxx@ep-xxx...?sslmode=require"
+   ```
+
+   **Windows (PowerShell):**
+   ```powershell
+   .\database\setup\apply_to_cloud.ps1 "postgres://vaahansetu_owner:xxxx@ep-xxx...?sslmode=require"
+   ```
+
+   The script is idempotent — re-running it drops and recreates the
+   `public` schema, so it doubles as a "reset the DB" command.
+
+5. **Share the connection details with teammates via a PRIVATE channel**
+   (Slack, Discord, WhatsApp, iMessage — never in a git commit or repo
+   README). Each teammate creates a local `.env` file (see below).
+
+**Neon connection details (after setup):**
+
+| Field | Value (example — yours will differ) |
+|-------|-------|
+| Host | `ep-cool-name-12345.us-east-2.aws.neon.tech` |
+| Port | `5432` (default; Neon uses the standard port) |
+| Database | `vaahansetu` |
+| Username | `vaahansetu_owner` (Neon project owner role) |
+| Password | (the long string Neon generated — share privately) |
+| JDBC URL | `jdbc:postgresql://ep-xxx.neon.tech/vaahansetu?sslmode=require` |
+
+> **SSL is mandatory on Neon** — always include `?sslmode=require` (or
+> `?sslmode=require` in the JDBC URL). The schema itself doesn't enforce
+> this; Neon does at the connection level.
+
+**Connecting your Java app (both options):**
+
+Copy `.env.example` (in the repo root) to `.env` and fill in your team's
+values. The `.env` file is gitignored and will never be committed.
+
+```bash
+cp .env.example .env
+# edit .env with your team's actual DB_URL, DB_USER, DB_PASSWORD
+```
+
+Then read those values from Java using
+[dotenv-java](https://github.com/cdimascio/dotenv-java) or
+`System.getenv(...)`. Example JDBC bootstrap:
+
+```java
+String url  = System.getenv("DB_URL");       // jdbc:postgresql://...
+String user = System.getenv("DB_USER");      // vaahansetu_owner (Neon) or postgres (local)
+String pass = System.getenv("DB_PASSWORD");  // Neon password or local password
+Connection conn = DriverManager.getConnection(url, user, pass);
+```
+
+**Neon free-tier limits (as of 2026):**
+- 0.5 GB storage (more than enough for this project's sample data)
+- Always-on (does not sleep like Supabase's free tier)
+- 1 project, 1 branch on the free plan
+- Compute autoscales to zero when idle (cold start ~1s)
+
+If you outgrow the free tier, the team can upgrade or move to a
+self-hosted Postgres — the schema and seed SQL work identically anywhere.
 
 ## Application role
 
