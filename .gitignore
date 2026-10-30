@@ -1,6 +1,17 @@
 # Java build files
 target/
+out/
+build/
 *.class
+*.jar
+*.war
+*.nar
+*.ear
+
+# Logs and crash files
+*.log
+hs_err_pid*
+replay_pid*
 
 # IDE files
 .idea/
@@ -10,13 +21,28 @@ target/
 .env
 .env.*
 !.env.example
-
-# Logs
-*.log
+.neon/
 
 # Database files — keep out of this upload
 backend/src/main/resources/data.sql
 backend/src/main/resources/schema.sql
-# Generated and backup files
+
+# Generated and archive files
 *.zip
+*.tar.gz
+*.rar
 *.bak
+
+# Java temporary files
+*.ctxt
+.mtj.tmp/
+
+# Neon CLI generated files
+neon.ts
+
+# Node generated files
+node_modules/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
