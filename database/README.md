@@ -8,9 +8,17 @@ Tables & Java Models* document).
 
 | File | Purpose | Run order |
 |------|---------|-----------|
-| `vaahansetu_schema.sql`          | DDL only — 8 enum types, 15 tables, FKs, CHECKs, UNIQUEs, partial-unique indexes, triggers, comments. Re-runnable. | 1 |
-| `vaahansetu_seed.sql`            | Small sample data (2 users, 4 buses, 7 stops, 2 routes, 3 trips, 4 journeys, 2 allocation runs, …). Re-runnable. | 2 |
+| `vaahansetu_schema.sql`          | DDL only — 8 enum types, 15 tables, FKs, CHECKs, UNIQUEs, partial-unique indexes, triggers, comments. Re-runnable. | 1 (fresh installs only) |
+| `vaahansetu_seed.sql`            | Small sample data (2 users, 4 buses, 7 stops, 2 routes, 3 trips, 4 journeys, 2 allocation runs, …). Re-runnable. | 2 (fresh installs only) |
 | `vaahansetu_constraint_tests.sql`| 15 negative tests that prove the CHECKs, FKs, UNIQUEs, partial-unique rules and triggers actually fire. | optional, after 1+2 |
+| `migrations/`                    | Incremental schema changes applied to an **existing** cloud DB. Each file is idempotent (safe to re-run). See `migrations/README.md`. | after the schema is already live |
+
+### Applying changes to an existing cloud DB
+
+If the schema is already deployed (e.g. on Neon) and you need to change
+it, **do NOT re-run `vaahansetu_schema.sql`** — that drops all data.
+Instead, write a numbered migration file in `database/migrations/` and
+apply it directly to the cloud DB via the Neon SQL Editor or `psql`.
 
 ## Requirements
 

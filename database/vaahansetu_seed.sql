@@ -16,11 +16,11 @@ INSERT INTO users (user_id, full_name, username, password_hash, role, is_active)
 SELECT setval(pg_get_serial_sequence('users','user_id'), (SELECT MAX(user_id) FROM users));
 
 -- ---------- buses ----------
-INSERT INTO buses (bus_id, registration_number, capacity, status, current_location, rest_duration_minutes, notes) VALUES
-    (101, 'KA-01-AA-1001', 45, 'ACTIVE',     'Central Depot', 15, 'Standard 45-seater'),
-    (102, 'KA-01-AA-1002', 45, 'ACTIVE',     'Central Depot', 15, NULL),
-    (103, 'KA-01-AA-1003', 35, 'MAINTENANCE','Workshop Bay 2', 0, 'Brake service in progress'),
-    (104, 'KA-02-BB-2001', 50, 'ACTIVE',     'East Depot',    20, NULL);
+INSERT INTO buses (bus_id, registration_number, capacity, status, current_location, rest_duration_minutes, rest_start, rest_end, notes) VALUES
+    (101, 'KA-01-AA-1001', 45, 'ACTIVE',     'Central Depot', 15, '13:00:00', '13:30:00', 'Standard 45-seater'),
+    (102, 'KA-01-AA-1002', 45, 'ACTIVE',     'Central Depot', 15, '13:00:00', '13:30:00', NULL),
+    (103, 'KA-01-AA-1003', 35, 'MAINTENANCE','Workshop Bay 2', 0, NULL,       NULL,        'Brake service in progress'),
+    (104, 'KA-02-BB-2001', 50, 'ACTIVE',     'East Depot',    20, '14:00:00', '14:30:00', NULL);
 SELECT setval(pg_get_serial_sequence('buses','bus_id'), (SELECT MAX(bus_id) FROM buses));
 
 -- ---------- stops (route R1: A -> B -> C -> D, route R2: X -> Y -> Z) ----------
