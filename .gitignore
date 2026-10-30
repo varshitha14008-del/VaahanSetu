@@ -34,6 +34,18 @@ target/
 
 # Environment variables and secrets
 .env
+.env.local
+.env.*.local
+
+# Neon CLI local config (contains connection details / API keys)
+.neon/
+
+# Neon CLI generates these when running `neon init` in a non-Java project folder.
+# They are not part of the Java desktop app and should not be committed.
+neon.ts
+package.json
+package-lock.json
+node_modules/
 
 # OS-generated files
 .DS_Store
