@@ -65,12 +65,16 @@ CREATE TABLE buses (
     status                 bus_status   NOT NULL,
     current_location       VARCHAR(150) NULL,             -- prototype: depot or last endpoint
     rest_duration_minutes  INTEGER      NOT NULL DEFAULT 0 CHECK (rest_duration_minutes >= 0),
+    rest_start             TIME         NULL,             -- daily rest-slot start (clock time)
+    rest_end               TIME         NULL,             -- daily rest-slot end (clock time; may be < rest_start for overnight rests)
     notes                  TEXT         NULL,
     created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 COMMENT ON TABLE  buses IS 'VaahanSetu bus fleet master data.';
 COMMENT ON COLUMN buses.capacity              IS 'Maximum permitted passengers.';
 COMMENT ON COLUMN buses.rest_duration_minutes IS 'Minimum rest interval a bus must take after a trip, in minutes.';
+COMMENT ON COLUMN buses.rest_start            IS 'Daily rest-slot start (clock time, NULL = no fixed slot). May be later than rest_end for overnight rests.';
+COMMENT ON COLUMN buses.rest_end              IS 'Daily rest-slot end (clock time, NULL = no fixed slot). May be earlier than rest_start for overnight rests.';
 
 -- 2.3 routes --------------------------------------------------------
 CREATE TABLE routes (
