@@ -100,6 +100,25 @@ SELECT 'negative rest_duration_minutes',
            UPDATE buses SET rest_duration_minutes = -5 WHERE bus_id = 101;
        $sql$);
 
+-- ---------- Test 9A: rest window must provide both start and end
+INSERT INTO pg_temp.test_results
+SELECT 'incomplete fixed rest window',
+       'should fail (CHECK both rest_start and rest_end together)',
+       pg_temp.try_block($sql$
+           INSERT INTO buses (registration_number, capacity, status, rest_start)
+           VALUES ('KA-00-ZZ-0001', 40, 'ACTIVE', TIME '10:00');
+       $sql$);
+
+-- ---------- Test 9B: valid fixed rest window is accepted
+INSERT INTO pg_temp.test_results
+SELECT 'valid fixed rest window',
+       'should succeed',
+       pg_temp.try_block($sql$
+           INSERT INTO buses
+               (registration_number, capacity, status, rest_start, rest_end)
+           VALUES ('KA-00-ZZ-0002', 40, 'ACTIVE', TIME '10:00', TIME '11:00');
+       $sql$);
+
 -- ---------- Test 10: try to delete a route_stop leaving route with < 2 stops
 --         Route 2 currently has 3 stops (X,Y,Z). Delete two of them — the
 --         second delete must be blocked.

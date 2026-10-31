@@ -1,3 +1,4 @@
+
 -- =====================================================================
 --  VaahanSetu  --  PostgreSQL schema (SRS v2.0, Database & Models doc)
 --  Generation order follows section 8 of the Database & Models doc:
@@ -63,18 +64,24 @@ CREATE TABLE buses (
     registration_number    VARCHAR(30)  NOT NULL UNIQUE,
     capacity               INTEGER      NOT NULL CHECK (capacity > 0),
     status                 bus_status   NOT NULL,
-    current_location       VARCHAR(150) NULL,             -- prototype: depot or last endpoint
+    current_location       VARCHAR(150) NULL, -- prototype: depot or last endpoint
     rest_duration_minutes  INTEGER      NOT NULL DEFAULT 0 CHECK (rest_duration_minutes >= 0),
-    rest_start             TIME         NULL,             -- daily rest-slot start (clock time)
-    rest_end               TIME         NULL,             -- daily rest-slot end (clock time; may be < rest_start for overnight rests)
+    rest_start             TIME         NULL, -- daily rest-slot start (clock time)
+    rest_end               TIME         NULL, -- daily rest-slot end; may be earlier than rest_start for overnight rests
     notes                  TEXT         NULL,
-    created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CHECK (
+        (rest_start IS NULL AND rest_end IS NULL)
+        OR
+        (rest_start IS NOT NULL AND rest_end IS NOT NULL)
+    )
 );
-COMMENT ON TABLE  buses IS 'VaahanSetu bus fleet master data.';
-COMMENT ON COLUMN buses.capacity              IS 'Maximum permitted passengers.';
+
+COMMENT ON TABLE buses IS 'VaahanSetu bus fleet master data.';
+COMMENT ON COLUMN buses.capacity IS 'Maximum permitted passengers.';
 COMMENT ON COLUMN buses.rest_duration_minutes IS 'Minimum rest interval a bus must take after a trip, in minutes.';
-COMMENT ON COLUMN buses.rest_start            IS 'Daily rest-slot start (clock time, NULL = no fixed slot). May be later than rest_end for overnight rests.';
-COMMENT ON COLUMN buses.rest_end              IS 'Daily rest-slot end (clock time, NULL = no fixed slot). May be earlier than rest_start for overnight rests.';
+COMMENT ON COLUMN buses.rest_start IS 'Daily rest-slot start (clock time, NULL = no fixed slot). May be later than rest_end for overnight rests.';
+COMMENT ON COLUMN buses.rest_end IS 'Daily rest-slot end (clock time, NULL = no fixed slot). May be earlier than rest_start for overnight rests.';
 
 -- 2.3 routes --------------------------------------------------------
 CREATE TABLE routes (
@@ -86,7 +93,7 @@ CREATE TABLE routes (
     estimated_duration_minutes  INTEGER      NOT NULL CHECK (estimated_duration_minutes > 0),
     is_active                   BOOLEAN      NOT NULL DEFAULT TRUE
 );
-COMMENT ON TABLE  routes IS 'Fixed routes. Path is never changed by the system; only the bus-to-trip assignment is.';
+COMMENT ON TABLE routes IS 'Fixed routes. Path is never changed by the system; only the bus-to-trip assignment is.';
 COMMENT ON COLUMN routes.estimated_duration_minutes IS 'Predetermined route duration (prototype convention; no per-trip override).';
 
 -- 2.4 stops ---------------------------------------------------------
@@ -248,14 +255,14 @@ CREATE TABLE segment_demand_adjustments (
     route_id               BIGINT   NOT NULL REFERENCES routes(route_id)             ON DELETE CASCADE,
     segment_start_stop_id  BIGINT   NOT NULL REFERENCES stops(stop_id)               ON DELETE RESTRICT,
     segment_end_stop_id    BIGINT   NOT NULL REFERENCES stops(stop_id)               ON DELETE RESTRICT,
-    demand_delta           INTEGER  NOT NULL,                 -- simulated +/- (5..10 magnitude per SRS F18)
-    is_simulated           BOOLEAN  NOT NULL DEFAULT TRUE,
-    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    demand_delta            INTEGER  NOT NULL,                 -- simulated +/- (5..10 magnitude per SRS F18)
+    is_simulated            BOOLEAN  NOT NULL DEFAULT TRUE,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (segment_start_stop_id <> segment_end_stop_id)
 );
 COMMENT ON TABLE  segment_demand_adjustments IS 'Simulated +/- adjustments to segment demand, kept SEPARATE from raw passenger_journeys (per SRS F18 / F19).';
-COMMENT ON COLUMN segment_demand_adjustments.demand_delta          IS 'Signed change. Magnitude 5..10 per SRS. Application must clamp resulting demand at 0.';
-COMMENT ON COLUMN segment_demand_adjustments.is_simulated          IS 'Always TRUE here. Column retained for clarity and cross-filtering.';
+COMMENT ON COLUMN segment_demand_adjustments.demand_delta IS 'Signed change. Magnitude 5..10 per SRS. Application must clamp resulting demand at 0.';
+COMMENT ON COLUMN segment_demand_adjustments.is_simulated IS 'Always TRUE here. Column retained for clarity and cross-filtering.';
 
 
 -- =====================================================================
@@ -274,10 +281,10 @@ CREATE TABLE allocation_segment_results (
     unused_capacity               INTEGER NOT NULL CHECK (unused_capacity    >= 0),
     CHECK (segment_start_stop_id <> segment_end_stop_id)
 );
-COMMENT ON TABLE  allocation_segment_results IS 'Per-segment outcome of an allocation run (recommended). One row per (run, route, consecutive-stop pair).';
-COMMENT ON COLUMN allocation_segment_results.accommodated     IS '= LEAST(demand, allocated_capacity).';
-COMMENT ON COLUMN allocation_segment_results.unmet_demand     IS '= GREATEST(0, demand - allocated_capacity).';
-COMMENT ON COLUMN allocation_segment_results.unused_capacity  IS '= GREATEST(0, allocated_capacity - demand).';
+COMMENT ON TABLE allocation_segment_results IS 'Per-segment outcome of an allocation run (recommended). One row per (run, route, consecutive-stop pair).';
+COMMENT ON COLUMN allocation_segment_results.accommodated IS '= LEAST(demand, allocated_capacity).';
+COMMENT ON COLUMN allocation_segment_results.unmet_demand IS '= GREATEST(0, demand - allocated_capacity).';
+COMMENT ON COLUMN allocation_segment_results.unused_capacity IS '= GREATEST(0, allocated_capacity - demand).';
 
 
 -- =====================================================================
@@ -298,19 +305,19 @@ CREATE UNIQUE INDEX uq_one_active_session
     WHERE status = 'ACTIVE';
 
 -- Speed up the most common lookup paths
-CREATE INDEX idx_route_stops_route_seq     ON route_stops (route_id, stop_sequence);
-CREATE INDEX idx_route_stops_stop          ON route_stops (stop_id);
-CREATE INDEX idx_scheduled_trips_route_dt  ON scheduled_trips (route_id, departure_time);
-CREATE INDEX idx_scheduled_trips_svc_date  ON scheduled_trips (service_date);
-CREATE INDEX idx_trip_assignments_bus      ON trip_assignments (bus_id);
-CREATE INDEX idx_trip_assignments_status   ON trip_assignments (status);
-CREATE INDEX idx_passenger_journeys_trip   ON passenger_journeys (trip_id);
+CREATE INDEX idx_route_stops_route_seq      ON route_stops (route_id, stop_sequence);
+CREATE INDEX idx_route_stops_stop           ON route_stops (stop_id);
+CREATE INDEX idx_scheduled_trips_route_dt   ON scheduled_trips (route_id, departure_time);
+CREATE INDEX idx_scheduled_trips_svc_date   ON scheduled_trips (service_date);
+CREATE INDEX idx_trip_assignments_bus       ON trip_assignments (bus_id);
+CREATE INDEX idx_trip_assignments_status    ON trip_assignments (status);
+CREATE INDEX idx_passenger_journeys_trip    ON passenger_journeys (trip_id);
 CREATE INDEX idx_passenger_journeys_session ON passenger_journeys (session_id);
-CREATE INDEX idx_passenger_journeys_status ON passenger_journeys (journey_status);
-CREATE INDEX idx_allocation_runs_session   ON allocation_runs (session_id);
+CREATE INDEX idx_passenger_journeys_status  ON passenger_journeys (journey_status);
+CREATE INDEX idx_allocation_runs_session    ON allocation_runs (session_id);
 CREATE INDEX idx_allocation_assignments_run ON allocation_assignments (allocation_run_id);
-CREATE INDEX idx_alloc_seg_results_run     ON allocation_segment_results (allocation_run_id);
-CREATE INDEX idx_seg_demand_adj_session    ON segment_demand_adjustments (session_id);
+CREATE INDEX idx_alloc_seg_results_run      ON allocation_segment_results (allocation_run_id);
+CREATE INDEX idx_seg_demand_adj_session     ON segment_demand_adjustments (session_id);
 
 
 -- =====================================================================
@@ -318,8 +325,7 @@ CREATE INDEX idx_seg_demand_adj_session    ON segment_demand_adjustments (sessio
 --    (SRS / PDF section 3 -- validation & calculation rules)
 -- =====================================================================
 
--- 9.1  Each route must have at least two stops (PDF: "Each route has at least two stops").
---      Enforced on DELETE of route_stops rows (cannot drop below 2).
+-- 9.1 Each route must have at least two stops.
 CREATE OR REPLACE FUNCTION fn_route_stops_min_two() RETURNS TRIGGER AS $$
 DECLARE
     n INTEGER;
@@ -340,24 +346,26 @@ CREATE TRIGGER trg_route_stops_min_two
     BEFORE DELETE ON route_stops
     FOR EACH ROW EXECUTE FUNCTION fn_route_stops_min_two();
 
--- 9.2  Passenger-journey stop order:
---        both stops must belong to the trip's route AND boarding must precede destination.
---      PDF explicitly notes this cannot be a CHECK; it requires a trigger or service validation.
+-- 9.2 Passenger-journey stop order.
 CREATE OR REPLACE FUNCTION fn_pj_check_stop_order() RETURNS TRIGGER AS $$
 DECLARE
     v_route_id        BIGINT;
     v_boarding_seq    INTEGER;
     v_destination_seq INTEGER;
 BEGIN
-    SELECT route_id INTO v_route_id FROM scheduled_trips WHERE trip_id = NEW.trip_id;
+    SELECT route_id INTO v_route_id
+    FROM scheduled_trips
+    WHERE trip_id = NEW.trip_id;
 
     SELECT rs.stop_sequence INTO v_boarding_seq
-        FROM route_stops rs
-        WHERE rs.route_id = v_route_id AND rs.stop_id = NEW.boarding_stop_id;
+    FROM route_stops rs
+    WHERE rs.route_id = v_route_id
+      AND rs.stop_id = NEW.boarding_stop_id;
 
     SELECT rs.stop_sequence INTO v_destination_seq
-        FROM route_stops rs
-        WHERE rs.route_id = v_route_id AND rs.stop_id = NEW.destination_stop_id;
+    FROM route_stops rs
+    WHERE rs.route_id = v_route_id
+      AND rs.stop_id = NEW.destination_stop_id;
 
     IF v_boarding_seq IS NULL OR v_destination_seq IS NULL THEN
         RAISE EXCEPTION 'Boarding/destination stops must belong to the route of trip % (route %).',
@@ -378,10 +386,11 @@ CREATE TRIGGER trg_pj_check_stop_order
     ON passenger_journeys
     FOR EACH ROW EXECUTE FUNCTION fn_pj_check_stop_order();
 
--- 9.3  Confirmation timestamps sanity (cannot be done as CHECK because NULLs are allowed).
+-- 9.3 Confirmation timestamps sanity.
 CREATE OR REPLACE FUNCTION fn_pj_confirmations() RETURNS TRIGGER AS $$
 BEGIN
-    IF NEW.alighting_confirmed_at IS NOT NULL AND NEW.boarding_confirmed_at IS NOT NULL
+    IF NEW.alighting_confirmed_at IS NOT NULL
+       AND NEW.boarding_confirmed_at IS NOT NULL
        AND NEW.alighting_confirmed_at < NEW.boarding_confirmed_at THEN
         RAISE EXCEPTION 'alighting_confirmed_at cannot be earlier than boarding_confirmed_at (journey %).', NEW.journey_id;
     END IF;
@@ -401,6 +410,7 @@ GRANT CONNECT ON DATABASE vaahansetu TO vaahansetu_app;
 GRANT USAGE ON SCHEMA public TO vaahansetu_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO vaahansetu_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO vaahansetu_app;
+
 -- Future tables (defensive)
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vaahansetu_app;
