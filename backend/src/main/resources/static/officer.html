@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VaahanSetu | Officer & Admin Console</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="officer.css">
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="header officer-header">
+        <div class="header-left">
+            <h1>VaahanSetu</h1>
+            <p>Fleet Allocation & Officer Management Console</p>
+        </div>
+        <div class="header-right">
+            <a href="index.html" class="portal-switch-btn">&larr; Passenger Portal</a>
+            <div id="userBadge" class="user-badge" hidden>
+                <span id="userRolePill" class="role-pill">OFFICER</span>
+                <span id="userFullName">-</span>
+                <button id="logoutBtn" class="btn btn-outline-light btn-sm">Logout</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="officer-main">
+
+        <!-- Login Section (shown when logged out) -->
+        <section id="loginSection" class="login-card">
+            <h2>Officer & Admin Login</h2>
+            <p class="login-subtitle">Sign in to manage fleet allocation, inspect demand, and run optimization.</p>
+            
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required placeholder="e.g. admin or officer1">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required placeholder="Enter password">
+                </div>
+                <button type="submit" class="submit-button">Sign In</button>
+            </form>
+
+            <div class="demo-hints">
+                <p><strong>Demo Credentials:</strong></p>
+                <ul>
+                    <li><span class="code">admin</span> / <span class="code">admin123</span> (Full Administrator: allocation + simulation)</li>
+                    <li><span class="code">officer1</span> / <span class="code">officer123</span> (Crowd Officer: fleet + allocation)</li>
+                </ul>
+            </div>
+            <p id="loginError" class="error-msg" aria-live="polite"></p>
+        </section>
+
+        <!-- Authenticated Dashboard (shown when logged in) -->
+        <div id="authenticatedApp" hidden>
+
+            <!-- Navigation Tabs -->
+            <nav class="nav-tabs" role="tablist">
+                <button class="tab-btn active" data-tab="tabDashboard">Overview</button>
+                <button class="tab-btn" data-tab="tabFleet">Bus Fleet</button>
+                <button class="tab-btn" data-tab="tabRoutes">Routes & Stops</button>
+                <button class="tab-btn" data-tab="tabTrips">Trips & Schedule</button>
+                <button class="tab-btn" data-tab="tabAllocation">Allocation Engine</button>
+                <button id="tabSimulationBtn" class="tab-btn admin-only" data-tab="tabSimulation">Simulation</button>
+            </nav>
+
+            <!-- Status Banner -->
+            <div id="globalAlert" class="global-alert" hidden></div>
+
+            <!-- Tab 1: Overview Dashboard -->
+            <section id="tabDashboard" class="tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Active Buses</h3>
+                        <p id="statActiveBuses" class="stat-value">0</p>
+                        <span class="stat-sub">Ready for service</span>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Active Routes</h3>
+                        <p id="statActiveRoutes" class="stat-value">0</p>
+                        <span class="stat-sub">Configured corridors</span>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Scheduled Trips</h3>
+                        <p id="statTripsToday" class="stat-value">0</p>
+                        <span class="stat-sub">Daily departures</span>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Planning Session</h3>
+                        <p id="statSessionStatus" class="stat-value">-</p>
+                        <span id="statSessionName" class="stat-sub">-</span>
+                    </div>
+                </div>
+
+                <div class="dashboard-cards-grid">
+                    <div class="card-box">
+                        <h3>Quick Optimization Summary</h3>
+                        <div id="dashLatestAllocation" class="empty-state">No allocation run executed yet. Click Allocation Engine to run optimization.</div>
+                    </div>
+                    <div class="card-box">
+                        <h3>Active Planning Session</h3>
+                        <div id="dashSessionDetails">Loading session details...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab 2: Bus Fleet Management -->
+            <section id="tabFleet" class="tab-content">
+                <div class="section-header">
+                    <h2>Fleet Management</h2>
+                    <button id="refreshFleetBtn" class="btn btn-secondary btn-sm">&#x21bb; Refresh</button>
+                </div>
+                <p>Monitor bus availability, passenger capacities, turnaround rest durations, and fixed daily rest slots.</p>
+                <div class="table-responsive">
+                    <table class="data-table" id="fleetTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Registration</th>
+                                <th>Capacity</th>
+                                <th>Status</th>
+                                <th>Location</th>
+                                <th>Turnaround Rest</th>
+                                <th>Daily Fixed Rest</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fleetTableBody">
+                            <tr><td colspan="8">Loading fleet...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Tab 3: Routes & Stops -->
+            <section id="tabRoutes" class="tab-content">
+                <div class="section-header">
+                    <h2>Corridors & Route Stops</h2>
+                    <button id="refreshRoutesBtn" class="btn btn-secondary btn-sm">&#x21bb; Refresh</button>
+                </div>
+                <p>Fixed transit routes and ordered stop sequences.</p>
+                <div id="routesContainer" class="routes-container">Loading routes...</div>
+            </section>
+
+            <!-- Tab 4: Trips & Schedule -->
+            <section id="tabTrips" class="tab-content">
+                <div class="section-header">
+                    <h2>Scheduled Trips & Active Assignments</h2>
+                    <button id="refreshTripsBtn" class="btn btn-secondary btn-sm">&#x21bb; Refresh</button>
+                </div>
+                <p>Live schedule departures and currently allocated buses.</p>
+                <div class="table-responsive">
+                    <table class="data-table" id="tripsTable">
+                        <thead>
+                            <tr>
+                                <th>Trip ID</th>
+                                <th>Route</th>
+                                <th>Date</th>
+                                <th>Departure</th>
+                                <th>Expected Arrival</th>
+                                <th>Assigned Bus</th>
+                                <th>Capacity</th>
+                                <th>Status</th>
+                                <th>Demand Inspection</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tripsTableBody">
+                            <tr><td colspan="9">Loading trips...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Trip Segment Demand Modal/Card -->
+                <div id="tripDemandDrawer" class="card-box drawer-box" hidden>
+                    <div class="section-header">
+                        <h3 id="drawerTripTitle">Segment Demand for Trip</h3>
+                        <button id="closeDrawerBtn" class="btn btn-secondary btn-sm">Close &times;</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Segment (Start &rarr; End)</th>
+                                    <th>Registered Demand</th>
+                                    <th>Simulated &Delta;</th>
+                                    <th>Effective Demand</th>
+                                    <th>Current Bus Capacity</th>
+                                    <th>Accommodated</th>
+                                    <th>Unmet Demand</th>
+                                </tr>
+                            </thead>
+                            <tbody id="drawerDemandBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab 5: Allocation Engine Hub -->
+            <section id="tabAllocation" class="tab-content">
+                <div class="section-header">
+                    <h2>Smart Bus Allocation Engine</h2>
+                    <div class="action-buttons">
+                        <button id="runAllocationBtn" class="btn btn-primary">&#9881; Run Allocation Engine</button>
+                    </div>
+                </div>
+                <p>Evaluates registered passenger journeys, enforces capacity constraints, daily rest windows, and applies the greedy optimization heuristic.</p>
+
+                <!-- Allocation Run Comparison Cards -->
+                <div id="allocationComparisonBox" hidden>
+                    <h3>Optimization Impact: Baseline vs Proposed</h3>
+                    <div class="comparison-grid">
+                        <div class="comp-col baseline-col">
+                            <h4>Baseline Allocation</h4>
+                            <div class="comp-metric"><span class="label">Total Demand:</span> <strong id="baseDemand">0</strong></div>
+                            <div class="comp-metric"><span class="label">Allocated Capacity:</span> <strong id="baseCapacity">0</strong></div>
+                            <div class="comp-metric"><span class="label">Accommodated:</span> <strong id="baseAccommodated">0</strong></div>
+                            <div class="comp-metric unmet"><span class="label">Unmet Demand:</span> <strong id="baseUnmet">0</strong></div>
+                            <div class="comp-metric"><span class="label">Unused Capacity:</span> <strong id="baseUnused">0</strong></div>
+                        </div>
+                        <div class="comp-arrow">&rarr;</div>
+                        <div class="comp-col proposed-col">
+                            <h4>Proposed Allocation</h4>
+                            <div class="comp-metric"><span class="label">Total Demand:</span> <strong id="propDemand">0</strong></div>
+                            <div class="comp-metric"><span class="label">Allocated Capacity:</span> <strong id="propCapacity">0</strong></div>
+                            <div class="comp-metric"><span class="label">Accommodated:</span> <strong id="propAccommodated">0</strong></div>
+                            <div class="comp-metric unmet highlight"><span class="label">Unmet Demand:</span> <strong id="propUnmet">0</strong></div>
+                            <div class="comp-metric"><span class="label">Unused Capacity:</span> <strong id="propUnused">0</strong></div>
+                        </div>
+                    </div>
+
+                    <div class="approve-bar">
+                        <div>
+                            <strong>Proposal Status:</strong> <span id="propStatusBadge" class="badge badge-proposed">PROPOSED</span>
+                            <span id="propIdBadge" class="prop-id-text">Run ID: -</span>
+                        </div>
+                        <button id="approveProposalBtn" class="btn btn-success">&#10004; Approve & Apply to Live Schedule</button>
+                    </div>
+
+                    <!-- Proposed Trip Outcomes Table -->
+                    <h3>Per-Trip Bus Assignments</h3>
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Trip ID</th>
+                                    <th>Route</th>
+                                    <th>Previous Bus</th>
+                                    <th>Proposed Bus</th>
+                                    <th>Outcome Type</th>
+                                    <th>Allocation Rationale</th>
+                                </tr>
+                            </thead>
+                            <tbody id="proposedAssignmentsBody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Per-Segment Breakdown Table -->
+                    <h3>Segment-Wise Passenger Accommodations</h3>
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Route</th>
+                                    <th>Segment</th>
+                                    <th>Demand</th>
+                                    <th>Proposed Capacity</th>
+                                    <th>Accommodated</th>
+                                    <th>Unmet Demand</th>
+                                    <th>Unused Capacity</th>
+                                </tr>
+                            </thead>
+                            <tbody id="proposedSegmentsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="noAllocationPlaceholder" class="empty-state">
+                    No active allocation proposal. Click <strong>Run Allocation Engine</strong> to generate an optimized fleet reallocation.
+                </div>
+            </section>
+
+            <!-- Tab 6: Simulation Controls (Admin Only) -->
+            <section id="tabSimulation" class="tab-content admin-only">
+                <div class="section-header">
+                    <h2>Simulation & Crowd Surge Controller</h2>
+                    <span class="badge badge-admin">ADMINISTRATOR ONLY</span>
+                </div>
+                <p>Inject synthetic demand variations (&plusmn;5 to 10 passengers) into route segments and advance the planning clock in 2-minute increments.</p>
+
+                <div class="card-box">
+                    <h3>Simulation Clock</h3>
+                    <div class="sim-clock-display">
+                        <span class="clock-label">Elapsed Session Simulation Time:</span>
+                        <strong id="simClockValue">+00:00</strong>
+                    </div>
+                    <div class="sim-buttons">
+                        <button id="simStepBtn" class="btn btn-primary">&#9658; Step Clock (+2 Minutes)</button>
+                        <button id="simResetBtn" class="btn btn-outline-danger">&#8635; Reset Simulated Demand</button>
+                    </div>
+                </div>
+                <div id="simLog" class="sim-log card-box">
+                    <h4>Simulation Activity Log</h4>
+                    <ul id="simLogList">
+                        <li>Simulation ready. Click "Step Clock" to advance time and inject crowd deltas.</li>
+                    </ul>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 VaahanSetu | Integrated Intelligent Fleet Reallocation Platform</p>
+    </footer>
+
+    <script src="officer.js"></script>
+</body>
+</html>

@@ -166,19 +166,28 @@ public class PassengerJourneyController {
 
     // Get passenger demand for the active planning session
     @GetMapping("/demand")
-    public ResponseEntity<List<Map<String, Object>>> getPassengerDemand() {
+    public ResponseEntity<Map<String, Object>> getPassengerDemand() {
 
         Long sessionId =
                 journeyRepository.findActiveSessionId();
 
         if (sessionId == null) {
-            return ResponseEntity.ok(List.of());
+            return ResponseEntity.ok(Map.of());
         }
 
-        List<Map<String, Object>> demand =
+        List<Map<String, Object>> demandList =
                 journeyRepository.findPassengerDemand(sessionId);
 
-        return ResponseEntity.ok(demand);
+        Map<String, Object> demandMap = new java.util.LinkedHashMap<>();
+        for (Map<String, Object> row : demandList) {
+            Object routeId = row.get("routeId");
+            Object count = row.get("passengerCount");
+            if (routeId != null) {
+                demandMap.put(String.valueOf(routeId), count != null ? Long.valueOf(count.toString()) : 0L);
+            }
+        }
+
+        return ResponseEntity.ok(demandMap);
     }
 
     // Update journey status

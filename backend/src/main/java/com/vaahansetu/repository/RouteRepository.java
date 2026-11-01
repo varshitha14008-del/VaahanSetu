@@ -52,7 +52,7 @@ public class RouteRepository {
         return jdbcTemplate.queryForList(sql, routeId);
     }
 
-    // Get buses actively allocated to a route for today
+    // Get buses actively allocated to a route for today (or latest scheduled date)
     public List<Map<String, Object>> findAllocatedBuses(Long routeId) {
 
         String sql = """
@@ -60,6 +60,9 @@ public class RouteRepository {
                        b.registration_number AS "registrationNumber",
                        b.capacity AS "capacity",
                        b.current_location AS "currentLocation",
+                       b.rest_duration_minutes AS "restDurationMinutes",
+                       b.rest_start AS "restStart",
+                       b.rest_end AS "restEnd",
                        st.trip_id AS "tripId",
                        st.departure_time AS "departureTime",
                        st.expected_arrival_time AS "expectedArrivalTime"
@@ -67,7 +70,10 @@ public class RouteRepository {
                 JOIN trip_assignments ta ON ta.trip_id = st.trip_id
                 JOIN buses b ON b.bus_id = ta.bus_id
                 WHERE st.route_id = ?
-                  AND st.service_date = ?
+                  AND st.service_date = COALESCE(
+                        (SELECT service_date FROM scheduled_trips WHERE route_id = ? AND service_date = CURRENT_DATE LIMIT 1),
+                        (SELECT service_date FROM scheduled_trips WHERE route_id = ? ORDER BY service_date DESC LIMIT 1)
+                  )
                   AND ta.status = 'ACTIVE'
                   AND b.status = 'ACTIVE'
                 ORDER BY st.departure_time
@@ -76,7 +82,8 @@ public class RouteRepository {
         return jdbcTemplate.queryForList(
                 sql,
                 routeId,
-                LocalDate.now()
+                routeId,
+                routeId
         );
     }
 }

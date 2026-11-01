@@ -17,7 +17,7 @@ public class JourneyRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    // Find today's trips that have an active allocated bus
+    // Find today's trips that have an active allocated bus (or latest scheduled date)
     public List<Map<String, Object>> findTodaysTrips(Long routeId) {
 
         String sql = """
@@ -34,7 +34,10 @@ public class JourneyRepository {
                 JOIN buses b
                     ON b.bus_id = ta.bus_id
                 WHERE st.route_id = ?
-                  AND st.service_date = ?
+                  AND st.service_date = COALESCE(
+                        (SELECT service_date FROM scheduled_trips WHERE route_id = ? AND service_date = CURRENT_DATE LIMIT 1),
+                        (SELECT service_date FROM scheduled_trips WHERE route_id = ? ORDER BY service_date DESC LIMIT 1)
+                  )
                   AND ta.status = 'ACTIVE'
                   AND st.status = 'SCHEDULED'
                   AND b.status = 'ACTIVE'
@@ -44,7 +47,8 @@ public class JourneyRepository {
         return jdbcTemplate.queryForList(
                 sql,
                 routeId,
-                LocalDate.now());
+                routeId,
+                routeId);
     }
 
     // Find the currently active planning session

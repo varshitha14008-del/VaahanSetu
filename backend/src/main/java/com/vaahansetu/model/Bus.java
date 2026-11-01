@@ -53,6 +53,34 @@ public class Bus {
         this.currentLocation = currentLocation;
     }
 
+    private Integer restDurationMinutes;
+    private java.time.LocalTime restStart;
+    private java.time.LocalTime restEnd;
+
+    public Integer getRestDurationMinutes() {
+        return restDurationMinutes;
+    }
+
+    public void setRestDurationMinutes(Integer restDurationMinutes) {
+        this.restDurationMinutes = restDurationMinutes;
+    }
+
+    public java.time.LocalTime getRestStart() {
+        return restStart;
+    }
+
+    public void setRestStart(java.time.LocalTime restStart) {
+        this.restStart = restStart;
+    }
+
+    public java.time.LocalTime getRestEnd() {
+        return restEnd;
+    }
+
+    public void setRestEnd(java.time.LocalTime restEnd) {
+        this.restEnd = restEnd;
+    }
+
     public String getNotes() {
         return notes;
     }

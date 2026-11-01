@@ -177,9 +177,16 @@ async function loadPassengerDemand() {
             return String(item.routeId) === String(selectedRouteId);
         });
 
-        const count = demand
-            ? demand[selectedRouteId] ?? 0
-            : 0;
+        let count = 0;
+        if (Array.isArray(demand)) {
+            const item = demand.find(function (d) {
+                return String(d.routeId) === String(selectedRouteId);
+            });
+            count = item && item.passengerCount != null ? Number(item.passengerCount) : 0;
+        } else if (demand && typeof demand === "object") {
+            const raw = demand[selectedRouteId];
+            count = raw != null && typeof raw === "object" ? Number(raw.passengerCount || 0) : Number(raw || 0);
+        }
 
         const card = document.createElement("div");
         card.className = "demand-item";
