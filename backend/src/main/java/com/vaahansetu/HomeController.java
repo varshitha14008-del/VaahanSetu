@@ -6,8 +6,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class HomeController {
 
-    @GetMapping("/")
-    public String home() {
-        return "VaahanSetu backend is running successfully!";
+    @GetMapping("/health")
+    public String health() {
+        return "VaahanSetu is running";
     }
 }

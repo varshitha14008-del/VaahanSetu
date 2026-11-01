@@ -44,8 +44,7 @@ public class JourneyRepository {
         return jdbcTemplate.queryForList(
                 sql,
                 routeId,
-                LocalDate.now()
-        );
+                LocalDate.now());
     }
 
     // Find the currently active planning session
@@ -59,8 +58,7 @@ public class JourneyRepository {
                 LIMIT 1
                 """;
 
-        List<Long> sessions =
-                jdbcTemplate.queryForList(sql, Long.class);
+        List<Long> sessions = jdbcTemplate.queryForList(sql, Long.class);
 
         return sessions.isEmpty() ? null : sessions.get(0);
     }
@@ -81,8 +79,7 @@ public class JourneyRepository {
         return jdbcTemplate.queryForList(
                 sql,
                 Long.class,
-                routeId
-        );
+                routeId);
     }
 
     // Save a passenger journey and return its generated ID
@@ -113,8 +110,7 @@ public class JourneyRepository {
                 tripId,
                 boardingStopId,
                 destinationStopId,
-                passengerCount
-        );
+                passengerCount);
     }
 
     // Find a saved journey
@@ -134,8 +130,7 @@ public class JourneyRepository {
                 WHERE pj.journey_id = ?
                 """;
 
-        List<Map<String, Object>> results =
-                jdbcTemplate.queryForList(sql, journeyId);
+        List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, journeyId);
 
         return results.isEmpty() ? null : results.get(0);
     }
@@ -162,14 +157,13 @@ public class JourneyRepository {
 
         String sql = """
                 UPDATE passenger_journeys
-                SET journey_status = ?
+                SET journey_status = CAST(? AS journey_status)
                 WHERE journey_id = ?
                 """;
 
         return jdbcTemplate.update(
                 sql,
                 status,
-                journeyId
-        );
+                journeyId);
     }
 }

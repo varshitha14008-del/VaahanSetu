@@ -1,0 +1,337 @@
+
+* {
+    box-sizing: border-box;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+body {
+    margin: 0;
+    padding: 30px 20px;
+    font-family: Arial, sans-serif;
+    background: #f1f5f9;
+    color: #1e293b;
+    line-height: 1.5;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.header h1 {
+    margin-bottom: 8px;
+    color: #0f766e;
+    font-size: 36px;
+}
+
+.header p {
+    margin-top: 0;
+    color: #64748b;
+}
+
+.welcome {
+    text-align: center;
+    margin-bottom: 25px;
+}
+
+.welcome h2 {
+    margin-bottom: 8px;
+    font-size: 25px;
+}
+
+.welcome p {
+    color: #64748b;
+    font-size: 15px;
+}
+
+.booking-card {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 30px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    box-shadow: 0 8px 25px rgba(15, 23, 42, 0.06);
+}
+
+.booking-card h2 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    text-align: center;
+    font-size: 23px;
+}
+
+.form-description {
+    margin-bottom: 25px;
+    text-align: center;
+    color: #64748b;
+    font-size: 14px;
+}
+
+label {
+    display: block;
+    margin-top: 18px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+select {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #1e293b;
+    font-size: 15px;
+}
+
+select:focus {
+    outline: 2px solid #0d9488;
+    border-color: #0d9488;
+}
+
+select:disabled {
+    background: #f1f5f9;
+    color: #94a3b8;
+    cursor: not-allowed;
+}
+
+.passenger-counter {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 25px;
+    margin-top: 10px;
+}
+
+.passenger-counter button {
+    width: 38px;
+    height: 38px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: #ccfbf1;
+    color: #0f766e;
+    font-size: 22px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.passenger-counter button:hover {
+    background: #99f6e4;
+}
+
+#passengerCountValue {
+    min-width: 25px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.submit-button {
+    width: 100%;
+    margin-top: 25px;
+    padding: 14px;
+    border: 0;
+    border-radius: 8px;
+    background: #0f766e;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.submit-button:hover {
+    background: #115e59;
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+button:focus-visible,
+select:focus-visible {
+    outline: 3px solid #5eead4;
+    outline-offset: 3px;
+}
+
+#message {
+    margin: 18px 0 0;
+    padding: 10px;
+    text-align: center;
+    color: #0f766e;
+    overflow-wrap: anywhere;
+}
+
+/* Travel note */
+
+.travel-note {
+    max-width: 520px;
+    margin: 20px auto;
+    padding: 12px 18px;
+    border-left: 4px solid #0f766e;
+    border-radius: 6px;
+    background: #e0f2f1;
+    color: #334155;
+    font-size: 13px;
+}
+
+/* Footer */
+
+footer {
+    margin-top: 30px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+/* Route and bus information */
+
+.route-details,
+.bus-details {
+    margin-top: 20px;
+    padding: 16px;
+    background: #f0fdfa;
+    border: 1px solid #99f6e4;
+    border-radius: 10px;
+}
+
+.route-details h3,
+.bus-details h3 {
+    margin-top: 0;
+    color: #0f766e;
+}
+
+.route-details p,
+.bus-details p {
+    margin: 10px 0;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+#busNumbers {
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    line-height: 1.8;
+}
+
+/* Journey confirmation */
+
+.confirmation-card {
+    margin-top: 20px;
+    padding: 18px;
+    background: #f0fdfa;
+    border: 1px solid #99f6e4;
+    border-radius: 10px;
+}
+
+.confirmation-card h3 {
+    margin-top: 0;
+    color: #0f766e;
+}
+
+.confirmation-card p {
+    margin: 10px 0;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+/* Passenger demand */
+/* Passenger demand */
+
+.demand-card {
+    max-width: 520px;
+    margin: 25px auto;
+    padding: 25px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    box-shadow: 0 8px 25px rgba(15, 23, 42, 0.06);
+}
+
+.demand-card h2 {
+    margin-top: 0;
+    color: #0f766e;
+}
+
+.demand-card > p {
+    color: #64748b;
+    font-size: 14px;
+}
+
+.demand-list {
+    margin-top: 20px;
+}
+
+.demand-item {
+    padding: 20px;
+    background: #f0fdfa;
+    border: 1px solid #99f6e4;
+    border-radius: 12px;
+    overflow-wrap: anywhere;
+}
+
+.demand-item h3 {
+    margin: 0 0 12px;
+    color: #0f766e;
+    font-size: 18px;
+}
+
+.demand-item p {
+    margin: 0;
+    color: #334155;
+    font-size: 16px;
+    font-weight: bold;
+}
+/* Responsive layout */
+
+@media (max-width: 600px) {
+    body {
+        padding: 25px 14px;
+    }
+
+    .header h1 {
+        font-size: 30px;
+    }
+
+    .welcome h2 {
+        font-size: 22px;
+    }
+
+    .booking-card {
+        padding: 22px;
+    }
+
+    .demand-card {
+        padding: 20px;
+    }
+
+    .demand-list {
+        grid-template-columns: 1fr;
+    }
+}
+.waiting-card {
+    margin-top: 20px;
+    padding: 20px;
+    background: #fff8e6;
+    border: 1px solid #f0c36d;
+    border-radius: 14px;
+    text-align: center;
+}
+
+.waiting-card h3 {
+    color: #9a6500;
+    margin-bottom: 10px;
+}
+
+.waiting-card p {
+    color: #664d03;
+    margin: 6px 0;
+}
