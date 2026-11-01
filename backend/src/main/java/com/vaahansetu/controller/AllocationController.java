@@ -19,7 +19,6 @@ import com.vaahansetu.service.AuthService.TokenSession;
 
 @RestController
 @RequestMapping("/api/officer/allocations")
-@CrossOrigin(origins = "*")
 public class AllocationController {
 
     private final AllocationStatusService allocationStatusService;

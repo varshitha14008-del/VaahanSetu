@@ -88,7 +88,7 @@ async function apiFetch(endpoint, options = {}) {
 
     const response = await fetch(`${API_BASE}${endpoint}`, options);
     if (response.status === 401) {
-        handleLogout();
+        handleLogout(true, "Your session has expired or is invalid. Please log in again.");
         throw new Error("Session expired. Please log in again.");
     }
     return response;
@@ -118,20 +118,23 @@ async function checkAuth() {
             currentUser = await res.json();
             showApp();
         } else {
-            showLogin();
+            showLogin("Session invalid. Please log in.");
         }
     } catch (e) {
-        showLogin();
+        showLogin("Session expired. Please log in again.");
     }
 }
 
-function showLogin() {
+function showLogin(errorMessage = "") {
     authToken = null;
     currentUser = null;
     localStorage.removeItem("vst_token");
     loginSection.hidden = false;
     authenticatedApp.hidden = true;
     userBadge.hidden = true;
+    if (loginError) {
+        loginError.textContent = errorMessage;
+    }
 }
 
 function showApp() {
@@ -179,14 +182,22 @@ loginForm.addEventListener("submit", async (e) => {
     }
 });
 
-function handleLogout() {
+function handleLogout(isExpired = false, message = "") {
     if (authToken) {
-        apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
+        fetch(`${API_BASE}/auth/logout`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${authToken}` }
+        }).catch(() => {});
     }
-    showLogin();
+    showLogin(message);
+    if (isExpired) {
+        showAlert(message || "Your session has expired. Please log in again.", "danger");
+    } else {
+        showAlert("You have been logged out successfully.", "success");
+    }
 }
 
-logoutBtn.addEventListener("click", handleLogout);
+logoutBtn.addEventListener("click", () => handleLogout(false));
 
 // ==========================================================================
 // TABS NAVIGATION

@@ -3,26 +3,28 @@ package com.vaahansetu.service;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import com.vaahansetu.model.User;
+import com.vaahansetu.model.UserSession;
+import com.vaahansetu.repository.SessionRepository;
 import com.vaahansetu.repository.UserRepository;
 
 @Service
 public class AuthService {
 
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
+
     private final UserRepository userRepository;
+    private final SessionRepository sessionRepository;
     private final PasswordEncoder passwordEncoder;
     private final SecureRandom secureRandom = new SecureRandom();
-
-    // In-memory token storage mapping token -> TokenSession
-    private final Map<String, TokenSession> activeTokens = new ConcurrentHashMap<>();
 
     public record TokenSession(
             Long userId,
@@ -47,8 +49,17 @@ public class AuthService {
     }
 
     public AuthService(UserRepository userRepository) {
+        this(userRepository, new SessionRepository(null), new BCryptPasswordEncoder());
+    }
+
+    public AuthService(UserRepository userRepository, SessionRepository sessionRepository) {
+        this(userRepository, sessionRepository, new BCryptPasswordEncoder());
+    }
+
+    public AuthService(UserRepository userRepository, SessionRepository sessionRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
-        this.passwordEncoder = new BCryptPasswordEncoder();
+        this.sessionRepository = sessionRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     public AuthResponse login(String username, String rawPassword) {
@@ -67,22 +78,7 @@ public class AuthService {
         try {
             matched = passwordEncoder.matches(rawPassword, user.getPasswordHash());
         } catch (Exception e) {
-            // Seed placeholder handling for demo accounts
-            if (("admin".equalsIgnoreCase(user.getUsername()) && "admin123".equals(rawPassword)) ||
-                ("officer1".equalsIgnoreCase(user.getUsername()) && "officer123".equals(rawPassword))) {
-                matched = true;
-                // Upgrade dummy placeholder hash to a genuine BCrypt hash
-                userRepository.updatePassword(user.getUserId(), passwordEncoder.encode(rawPassword));
-            }
-        }
-
-        if (!matched) {
-            // Fallback for default demo passwords if seed hash was unhashed
-            if (("admin".equalsIgnoreCase(user.getUsername()) && "admin123".equals(rawPassword)) ||
-                ("officer1".equalsIgnoreCase(user.getUsername()) && "officer123".equals(rawPassword))) {
-                matched = true;
-                userRepository.updatePassword(user.getUserId(), passwordEncoder.encode(rawPassword));
-            }
+            matched = false;
         }
 
         if (!matched) {
@@ -94,18 +90,18 @@ public class AuthService {
         secureRandom.nextBytes(randomBytes);
         String token = "vst_" + Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
 
+        // Store SHA-256 hash in persistent session storage, NEVER raw bearer token
+        String tokenHash = SessionRepository.hashToken(token);
+
         Instant now = Instant.now();
         Instant expires = now.plusSeconds(86400 * 7); // 7-day session validity
 
-        TokenSession session = new TokenSession(
+        sessionRepository.saveSession(
                 user.getUserId(),
-                user.getUsername(),
-                user.getFullName(),
+                tokenHash,
                 user.getRole(),
                 now,
                 expires);
-
-        activeTokens.put(token, session);
 
         return new AuthResponse(
                 token,
@@ -121,19 +117,43 @@ public class AuthService {
             return Optional.empty();
         }
 
-        String token = authHeader.substring(7).trim();
-        TokenSession session = activeTokens.get(token);
-
-        if (session == null) {
+        String rawToken = authHeader.substring(7).trim();
+        if (rawToken.isEmpty()) {
             return Optional.empty();
         }
 
-        if (session.isExpired()) {
-            activeTokens.remove(token);
+        String tokenHash = SessionRepository.hashToken(rawToken);
+        Optional<UserSession> sessionOpt = sessionRepository.findSessionByTokenHash(tokenHash);
+
+        if (sessionOpt.isEmpty()) {
             return Optional.empty();
         }
 
-        return Optional.of(session);
+        UserSession session = sessionOpt.get();
+
+        // Check revocation and expiration
+        if (session.getIsRevoked() || session.isExpired()) {
+            return Optional.empty();
+        }
+
+        // Fresh database validation of user account state and permissions
+        Optional<User> userOpt = userRepository.findById(session.getUserId());
+        if (userOpt.isEmpty() || Boolean.FALSE.equals(userOpt.get().getIsActive())) {
+            return Optional.empty();
+        }
+
+        User user = userOpt.get();
+        String currentRole = user.getRole() != null ? user.getRole() : session.getRole();
+
+        TokenSession tokenSession = new TokenSession(
+                user.getUserId(),
+                user.getUsername(),
+                user.getFullName(),
+                currentRole,
+                session.getCreatedAt(),
+                session.getExpiresAt());
+
+        return Optional.of(tokenSession);
     }
 
     public TokenSession requireOfficer(String authHeader) {
@@ -152,7 +172,11 @@ public class AuthService {
 
     public void logout(String authHeader) {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            activeTokens.remove(authHeader.substring(7).trim());
+            String rawToken = authHeader.substring(7).trim();
+            if (!rawToken.isEmpty()) {
+                String tokenHash = SessionRepository.hashToken(rawToken);
+                sessionRepository.revokeSession(tokenHash);
+            }
         }
     }
 }

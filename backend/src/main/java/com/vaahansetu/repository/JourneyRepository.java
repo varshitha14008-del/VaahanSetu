@@ -17,9 +17,10 @@ public class JourneyRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    // Find today's trips that have an active allocated bus (or latest scheduled date)
+    // Find today's trips that have an active allocated bus (or next upcoming scheduled date)
     public List<Map<String, Object>> findTodaysTrips(Long routeId) {
-
+        // Only current or explicitly valid future service dates are eligible.
+        // Never fall back to past dates (< CURRENT_DATE).
         String sql = """
                 SELECT DISTINCT
                        st.trip_id AS "tripId",
@@ -36,7 +37,7 @@ public class JourneyRepository {
                 WHERE st.route_id = ?
                   AND st.service_date = COALESCE(
                         (SELECT service_date FROM scheduled_trips WHERE route_id = ? AND service_date = CURRENT_DATE LIMIT 1),
-                        (SELECT service_date FROM scheduled_trips WHERE route_id = ? ORDER BY service_date DESC LIMIT 1)
+                        (SELECT service_date FROM scheduled_trips WHERE route_id = ? AND service_date > CURRENT_DATE ORDER BY service_date ASC LIMIT 1)
                   )
                   AND ta.status = 'ACTIVE'
                   AND st.status = 'SCHEDULED'

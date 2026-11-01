@@ -252,12 +252,12 @@ public class AllocationRepository {
                 LocalDate day = time.toLocalDate();
 
                 // Check if scheduled trips exist for this day and session.
-                // If not, fallback to the latest available scheduled service date for the session
-                // so demo seed data or off-schedule runs execute reliably.
+                // Only current or explicitly valid future service dates are eligible.
+                // Never fall back to past dates (< day).
                 List<LocalDate> availableDays = query(c, "SELECT DISTINCT t.service_date FROM scheduled_trips t "
                                 + "JOIN session_routes sr ON sr.route_id = t.route_id AND sr.session_id = ? "
-                                + "WHERE t.status = 'SCHEDULED' ORDER BY t.service_date DESC",
-                                rs -> rs.getObject(1, LocalDate.class), sessionId);
+                                + "WHERE t.status = 'SCHEDULED' AND t.service_date >= ? ORDER BY t.service_date ASC",
+                                rs -> rs.getObject(1, LocalDate.class), sessionId, day);
 
                 LocalDate targetDay = day;
                 LocalDateTime filterTime = time;
@@ -355,7 +355,7 @@ public class AllocationRepository {
          * trip_assignments is NOT modified: the proposal is only stored (README
          * decision 6).
          */
-        public void save(Connection c, long sessionId, Result r) throws SQLException {
+        public long save(Connection c, long sessionId, Result r) throws SQLException {
                 try (PreparedStatement del = c.prepareStatement(
                                 "DELETE FROM allocation_runs WHERE session_id = ? AND notes LIKE ?")) {
                         del.setLong(1, sessionId);
@@ -384,6 +384,8 @@ public class AllocationRepository {
                 }
                 insertSegments(c, baselineRun, r.beforeSegments());
                 insertSegments(c, proposedRun, r.afterSegments());
+
+                return proposedRun;
         }
 
         private long insertRun(Connection c, long sessionId, String status, Metrics m, String notes)

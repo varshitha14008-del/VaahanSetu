@@ -40,6 +40,20 @@ public class AuthServiceTest {
             }
 
             @Override
+            public Optional<User> findById(Long userId) {
+                if (Long.valueOf(1L).equals(userId)) {
+                    return Optional.of(new User(1L, "System Admin", "admin", encoder.encode("secretAdmin"), "ADMIN", true));
+                }
+                if (Long.valueOf(2L).equals(userId)) {
+                    return Optional.of(new User(2L, "Officer One", "officer", encoder.encode("secretOfficer"), "OFFICER", true));
+                }
+                if (Long.valueOf(3L).equals(userId)) {
+                    return Optional.of(new User(3L, "Inactive User", "inactive", encoder.encode("password"), "OFFICER", false));
+                }
+                return Optional.empty();
+            }
+
+            @Override
             public int updatePassword(Long userId, String passwordHash) {
                 return 1;
             }

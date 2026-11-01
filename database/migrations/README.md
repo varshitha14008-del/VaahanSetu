@@ -39,6 +39,7 @@ to your local DB.
 | # | File | Description | Date |
 |---|------|-------------|------|
 | 001 | `001_add_rest_slots_to_buses.sql` | Added `rest_start` and `rest_end` (TIME, NULL) to `buses` for daily rest-slot windows. Backfilled sample data. | 2026-10-30 |
+| 002 | `002_user_sessions.sql` | Added `user_sessions` table with SHA-256 token hashing, expiration, and revocation status for persistent officer and admin logins across restarts. | 2026-11-02 |
 
 ## Conventions
 

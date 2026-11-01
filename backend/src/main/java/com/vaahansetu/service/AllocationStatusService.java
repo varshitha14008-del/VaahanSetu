@@ -52,6 +52,17 @@ public class AllocationStatusService {
         try (Connection conn = allocationRepository.open()) {
             conn.setAutoCommit(false);
             try {
+                // Concurrency control: acquire row-level lock on planning session to serialize execution
+                try (java.sql.PreparedStatement lockStmt = conn.prepareStatement(
+                        "SELECT session_id FROM planning_sessions WHERE session_id = ? FOR UPDATE")) {
+                    lockStmt.setLong(1, sessionId);
+                    try (java.sql.ResultSet rs = lockStmt.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new IllegalStateException("Planning session " + sessionId + " does not exist.");
+                        }
+                    }
+                }
+
                 LocalDateTime now = LocalDateTime.now();
                 AllocationModels.Input input = allocationRepository.load(conn, sessionId, now);
 
@@ -60,13 +71,9 @@ public class AllocationStatusService {
                 }
 
                 AllocationModels.Result result = AllocationEngine.allocate(input);
-                allocationRepository.save(conn, sessionId, result);
+                // Directly retrieve and associate this execution's unique generated proposal run ID
+                long proposedRunId = allocationRepository.save(conn, sessionId, result);
                 conn.commit();
-
-                // Retrieve the saved proposed run ID
-                Long proposedRunId = jdbcTemplate.queryForObject(
-                        "SELECT allocation_run_id FROM allocation_runs WHERE session_id = ? AND status = 'PROPOSED' ORDER BY allocation_run_id DESC LIMIT 1",
-                        Long.class, sessionId);
 
                 return mapToResponse(proposedRunId, "PROPOSED", result);
 
@@ -86,7 +93,7 @@ public class AllocationStatusService {
         }
 
         List<Map<String, Object>> runs = jdbcTemplate.queryForList(
-                "SELECT allocation_run_id, status::text, session_id FROM allocation_runs WHERE allocation_run_id = ?",
+                "SELECT allocation_run_id, status::text, session_id FROM allocation_runs WHERE allocation_run_id = ? FOR UPDATE",
                 runId);
 
         if (runs.isEmpty()) {

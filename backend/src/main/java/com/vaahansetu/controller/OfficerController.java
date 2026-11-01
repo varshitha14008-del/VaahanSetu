@@ -25,7 +25,6 @@ import com.vaahansetu.service.AuthService.TokenSession;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*")
 public class OfficerController {
 
     private final JdbcTemplate jdbcTemplate;

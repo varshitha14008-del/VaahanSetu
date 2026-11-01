@@ -19,7 +19,6 @@ import com.vaahansetu.repository.JourneyRepository;
 
 @RestController
 @RequestMapping("/api/passenger-journeys")
-@CrossOrigin(origins = "*")
 public class PassengerJourneyController {
 
     private final JourneyRepository journeyRepository;

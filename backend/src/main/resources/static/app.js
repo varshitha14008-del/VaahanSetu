@@ -337,7 +337,7 @@ async function loadAllocatedBuses(routeId) {
 
         if (!Array.isArray(buses) || buses.length === 0) {
             busCount.textContent =
-                "No buses available at the moment. Please wait...";
+                "No buses currently scheduled for today or upcoming departures on this route.";
 
             busNumbers.textContent = "";
             return;

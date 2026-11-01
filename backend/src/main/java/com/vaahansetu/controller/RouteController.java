@@ -14,7 +14,6 @@ import com.vaahansetu.repository.RouteRepository;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*")
 public class RouteController {
 
     private final RouteRepository routeRepository;

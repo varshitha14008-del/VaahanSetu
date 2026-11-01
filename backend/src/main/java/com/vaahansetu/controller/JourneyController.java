@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/journeys")
-@CrossOrigin(origins = "*")
 public class JourneyController {
 
     private final PassengerJourneyController passengerJourneyController;

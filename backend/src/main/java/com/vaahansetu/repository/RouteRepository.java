@@ -72,7 +72,7 @@ public class RouteRepository {
                 WHERE st.route_id = ?
                   AND st.service_date = COALESCE(
                         (SELECT service_date FROM scheduled_trips WHERE route_id = ? AND service_date = CURRENT_DATE LIMIT 1),
-                        (SELECT service_date FROM scheduled_trips WHERE route_id = ? ORDER BY service_date DESC LIMIT 1)
+                        (SELECT service_date FROM scheduled_trips WHERE route_id = ? AND service_date > CURRENT_DATE ORDER BY service_date ASC LIMIT 1)
                   )
                   AND ta.status = 'ACTIVE'
                   AND b.status = 'ACTIVE'
