@@ -75,14 +75,21 @@ public class JourneyRepository {
                        st.departure_time AS "departureTime",
                        st.expected_arrival_time AS "expectedArrivalTime",
                        st.status,
-                       ta.bus_id AS "busId",
+                       b.bus_id AS "busId",
                        COALESCE(b.registration_number, 'UNASSIGNED') AS "registrationNumber",
                        COALESCE(b.capacity, 0) AS "capacity"
                 FROM scheduled_trips st
-                LEFT JOIN trip_assignments ta
-                    ON ta.trip_id = st.trip_id AND ta.status = 'ACTIVE'
-                LEFT JOIN buses b
-                    ON b.bus_id = ta.bus_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        STRING_AGG(b2.registration_number, ', ' ORDER BY b2.bus_id) AS registration_number,
+                        COALESCE(SUM(b2.capacity), 0) AS capacity,
+                        MIN(ta2.bus_id) AS bus_id
+                    FROM trip_assignments ta2
+                    JOIN buses b2 ON b2.bus_id = ta2.bus_id
+                    WHERE ta2.trip_id = st.trip_id
+                      AND ta2.status = 'ACTIVE'
+                      AND b2.status = 'ACTIVE'
+                ) b ON TRUE
                 WHERE st.route_id = ?
                   AND st.service_date = COALESCE(?,
                         (SELECT started_at::date FROM planning_sessions WHERE status = 'ACTIVE' ORDER BY started_at DESC LIMIT 1),
@@ -337,22 +344,31 @@ public class JourneyRepository {
                        GREATEST(0, COALESCE(j.booked_count, 0) + COALESCE(j.inquiry_count, 0)) AS "passengerCount",
                        CASE
                            WHEN COALESCE(b.capacity, 0) > 0 THEN
-                               ROUND((GREATEST(0, COALESCE(j.booked_count, 0) + COALESCE(j.inquiry_count, 0))::numeric * 100.0) / b.capacity, 1)
+                               ROUND((COALESCE(j.booked_count, 0)::numeric * 100.0) / b.capacity, 1)
                            ELSE 0.0
                        END                                                            AS "occupancyPercentage",
                        CASE
-                           WHEN COALESCE(b.capacity, 0) > 0 AND GREATEST(0, COALESCE(j.booked_count, 0) + COALESCE(j.inquiry_count, 0)) > b.capacity THEN TRUE
+                           WHEN COALESCE(b.capacity, 0) > 0 AND COALESCE(j.booked_count, 0) > b.capacity THEN TRUE
                            ELSE FALSE
                        END                                                            AS "overcapacity",
                        CASE
-                           WHEN COALESCE(b.capacity, 0) > 0 AND GREATEST(0, COALESCE(j.booked_count, 0) + COALESCE(j.inquiry_count, 0)) > b.capacity THEN TRUE
+                           WHEN COALESCE(b.capacity, 0) > 0 AND COALESCE(j.booked_count, 0) > b.capacity THEN TRUE
                            ELSE FALSE
                        END                                                            AS "isOvercapacity"
                 FROM scheduled_trips st
                 JOIN routes r ON r.route_id = st.route_id
                 JOIN session_routes sr ON sr.route_id = r.route_id AND sr.session_id = ?::bigint
-                LEFT JOIN trip_assignments ta ON ta.trip_id = st.trip_id AND ta.status = 'ACTIVE'
-                LEFT JOIN buses b ON b.bus_id = ta.bus_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        STRING_AGG(b2.registration_number, ', ' ORDER BY b2.bus_id) AS registration_number,
+                        COALESCE(SUM(b2.capacity), 0) AS capacity,
+                        MIN(ta2.bus_id) AS bus_id
+                    FROM trip_assignments ta2
+                    JOIN buses b2 ON b2.bus_id = ta2.bus_id
+                    WHERE ta2.trip_id = st.trip_id
+                      AND ta2.status = 'ACTIVE'
+                      AND b2.status = 'ACTIVE'
+                ) b ON TRUE
                 LEFT JOIN LATERAL (
                     SELECT
                         COALESCE(SUM(CASE WHEN pj.journey_status IN ('REGISTERED', 'BOARDED', 'COMPLETED') THEN pj.passenger_count ELSE 0 END), 0) AS booked_count,

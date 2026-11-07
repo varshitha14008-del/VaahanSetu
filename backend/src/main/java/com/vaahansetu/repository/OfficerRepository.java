@@ -178,12 +178,44 @@ public class OfficerRepository {
                        t.departure_time        AS "departureTime",
                        t.expected_arrival_time  AS "expectedArrivalTime",
                        t.status::text          AS "status",
-                       ta.bus_id               AS "currentBusId",
+                       b.bus_id                AS "currentBusId",
                        b.registration_number   AS "currentBusRegistration",
                        COALESCE(b.capacity, 0) AS "currentBusCapacity",
                        COALESCE(b.rest_duration_minutes, 0) AS "currentBusRestDurationMinutes",
                        b.rest_start::text      AS "currentBusRestStart",
                        b.rest_end::text        AS "currentBusRestEnd",
+                       COALESCE(pj_counts.booked_count, 0)  AS "bookedPassengerCount",
+                       COALESCE(pj_counts.inquiry_count, 0) AS "activeInquiryCount",
+                       COALESCE(pj_counts.total_count, 0)   AS "totalDemand",
+                       COALESCE((
+                           SELECT MAX(sub.seg_demand)
+                           FROM (
+                               SELECT (
+                                   COALESCE((
+                                       SELECT SUM(pj.passenger_count)
+                                       FROM passenger_journeys pj
+                                       WHERE pj.trip_id = t.trip_id
+                                         AND pj.journey_status IN ('REGISTERED', 'BOARDED', 'COMPLETED', 'UNCONFIRMED')
+                                         AND pj.boarding_stop_id IN (
+                                             SELECT rs3.stop_id FROM route_stops rs3 WHERE rs3.route_id = rs.route_id AND rs3.stop_sequence <= rs.stop_sequence
+                                         )
+                                         AND pj.destination_stop_id IN (
+                                             SELECT rs4.stop_id FROM route_stops rs4 WHERE rs4.route_id = rs.route_id AND rs4.stop_sequence >= rs.stop_sequence + 1
+                                         )
+                                   ), 0)
+                                   +
+                                   COALESCE((
+                                       SELECT SUM(sda.demand_delta)
+                                       FROM segment_demand_adjustments sda
+                                       WHERE (sda.session_id = ? OR ? IS NULL)
+                                         AND sda.route_id = rs.route_id
+                                         AND sda.segment_start_stop_id = rs.stop_id
+                                   ), 0)
+                               ) AS seg_demand
+                               FROM route_stops rs
+                               WHERE rs.route_id = t.route_id
+                           ) sub
+                       ), 0) AS "peakSegmentDemand",
                        COALESCE((
                            SELECT MAX(sub.seg_demand)
                            FROM (
@@ -215,9 +247,29 @@ public class OfficerRepository {
                        ), 0) AS "demand"
                 FROM scheduled_trips t
                 JOIN routes r ON r.route_id = t.route_id
-                LEFT JOIN trip_assignments ta
-                    ON ta.trip_id = t.trip_id AND ta.status = 'ACTIVE'
-                LEFT JOIN buses b ON b.bus_id = ta.bus_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        STRING_AGG(b2.registration_number, ', ' ORDER BY b2.bus_id) AS registration_number,
+                        COALESCE(SUM(b2.capacity), 0) AS capacity,
+                        MIN(ta.bus_id) AS bus_id,
+                        MAX(b2.rest_duration_minutes) AS rest_duration_minutes,
+                        MAX(b2.rest_start::text) AS rest_start,
+                        MAX(b2.rest_end::text) AS rest_end
+                    FROM trip_assignments ta
+                    JOIN buses b2 ON b2.bus_id = ta.bus_id
+                    WHERE ta.trip_id = t.trip_id
+                      AND ta.status = 'ACTIVE'
+                      AND b2.status = 'ACTIVE'
+                ) b ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COALESCE(SUM(CASE WHEN pj.journey_status IN ('REGISTERED', 'BOARDED', 'COMPLETED') THEN pj.passenger_count ELSE 0 END), 0) AS booked_count,
+                        COALESCE(SUM(CASE WHEN pj.journey_status = 'UNCONFIRMED' THEN pj.passenger_count ELSE 0 END), 0) AS inquiry_count,
+                        COALESCE(SUM(CASE WHEN pj.journey_status IN ('REGISTERED', 'BOARDED', 'COMPLETED', 'UNCONFIRMED') THEN pj.passenger_count ELSE 0 END), 0) AS total_count
+                    FROM passenger_journeys pj
+                    WHERE pj.trip_id = t.trip_id
+                      AND (pj.session_id = ? OR ? IS NULL)
+                ) pj_counts ON TRUE
                 WHERE t.service_date = COALESCE(?,
                         (SELECT started_at::date FROM planning_sessions WHERE status = 'ACTIVE' ORDER BY started_at DESC LIMIT 1),
                         (SELECT MAX(service_date) FROM scheduled_trips),
@@ -231,7 +283,7 @@ public class OfficerRepository {
                   )
                 ORDER BY t.departure_time, t.trip_id
                 """;
-        return jdbcTemplate.queryForList(sql, sessionId, sessionId, serviceDate, sessionId, sessionId, sessionId);
+        return jdbcTemplate.queryForList(sql, sessionId, sessionId, sessionId, sessionId, sessionId, sessionId, serviceDate, sessionId, sessionId, sessionId);
     }
 
     // ----------------------------------------------------------------

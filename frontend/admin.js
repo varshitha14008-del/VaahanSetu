@@ -331,11 +331,14 @@ async function fetchTrips() {
             const cap = busCap ? `${busCap} seats` : '-';
             const depLabel = t.departureTime ? (t.departureTime.length > 16 ? t.departureTime.substring(11, 16) : t.departureTime) : '-';
             const arrLabel = t.expectedArrivalTime ? (t.expectedArrivalTime.length > 16 ? t.expectedArrivalTime.substring(11, 16) : t.expectedArrivalTime) : (t.arrivalTime || '-');
-            const peakDemand = t.demand || 0;
+            const booked = t.bookedPassengerCount != null ? t.bookedPassengerCount : (t.demand || 0);
+            const inq = t.activeInquiryCount != null ? t.activeInquiryCount : 0;
+            const totalD = t.totalDemand != null ? t.totalDemand : (booked + inq);
+            const peakDemand = t.peakSegmentDemand != null ? t.peakSegmentDemand : (t.demand || 0);
 
             let demandBadge = '';
             if (busCap && busCap > 0) {
-                const occ = Math.round((peakDemand / busCap) * 100);
+                const occ = Math.round((booked / busCap) * 100);
                 if (occ > 100) {
                     demandBadge = `<span class="status-badge badge-resting" style="margin-left: 6px;">Overcap (${occ}%)</span>`;
                 } else if (occ >= 80) {
@@ -344,7 +347,9 @@ async function fetchTrips() {
                     demandBadge = `<span class="status-badge badge-active" style="margin-left: 6px;">${occ}%</span>`;
                 }
             }
-            const demandDisplay = `<strong>${peakDemand} pax</strong>${demandBadge}`;
+            const inqText = inq > 0 ? ` <span style="font-size:12px; color:#64748b;">(+${inq} inq)</span>` : '';
+            const peakInfo = `<div style="font-size:11px; color:#64748b; font-weight:normal;">Peak Seg: ${peakDemand} pax</div>`;
+            const demandDisplay = `<div><strong>${booked} booked</strong>${inqText}${demandBadge}</div>${peakInfo}`;
 
             return `
                 <tr>

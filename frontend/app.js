@@ -25,6 +25,7 @@ const increasePassengers = document.getElementById("increasePassengers");
 const passengerCountValue = document.getElementById("passengerCountValue");
 
 const busDetails = document.getElementById("busDetails");
+const tripBusAssignment = document.getElementById("tripBusAssignment");
 const busCount = document.getElementById("busCount");
 const busNumbers = document.getElementById("busNumbers");
 
@@ -178,6 +179,7 @@ async function loadScheduledTrips(routeId) {
 
         if (!Array.isArray(routeTrips) || routeTrips.length === 0) {
             populateDropdown(tripSelect, [], "No scheduled departures today");
+            updateTripBusAssignment();
             return;
         }
 
@@ -197,11 +199,36 @@ async function loadScheduledTrips(routeId) {
         if (tripItems.length > 0) {
             tripSelect.selectedIndex = 1;
         }
+        updateTripBusAssignment();
 
     } catch (error) {
         console.error("Trip loading error:", error);
         populateDropdown(tripSelect, [], "Could not load trips");
+        updateTripBusAssignment();
     }
+}
+
+function updateTripBusAssignment() {
+    if (!tripBusAssignment) return;
+    if (!tripSelect || !tripSelect.value) {
+        tripBusAssignment.textContent = "Choose a scheduled departure to view assigned bus";
+        return;
+    }
+    const selectedTrip = Array.isArray(routeTrips)
+        ? routeTrips.find(function (t) { return String(t.tripId) === String(tripSelect.value); })
+        : null;
+    if (selectedTrip && selectedTrip.registrationNumber && selectedTrip.registrationNumber !== "UNASSIGNED") {
+        tripBusAssignment.innerHTML = `<strong style="color: #0369a1;">${selectedTrip.registrationNumber}</strong> (${selectedTrip.capacity} seats)`;
+    } else {
+        tripBusAssignment.innerHTML = `<span style="color: #64748b;">Pending Allocation</span>`;
+    }
+}
+
+if (tripSelect) {
+    tripSelect.addEventListener("change", function () {
+        updateTripBusAssignment();
+        logSearchIntent();
+    });
 }
 
 // ======================================
@@ -316,11 +343,11 @@ async function loadPassengerDemand() {
 
             let badgeHtml = "";
             if (isOvercap) {
-                badgeHtml = `<span class="status-badge" style="background:#fee2e2; color:#991b1b; font-size:12px; font-weight:600; padding:3px 8px; border-radius:6px;">Overcapacity (${occ}%)</span>`;
+                badgeHtml = `<span class="status-badge" style="background:#fee2e2; color:#991b1b; font-size:12px; font-weight:600; padding:3px 8px; border-radius:6px;">Overcapacity (${occ}% - ${booked}/${cap} booked)</span>`;
             } else if (cap > 0) {
                 const badgeBg = occ > 75 ? "#fef3c7" : "#e0f2fe";
                 const badgeColor = occ > 75 ? "#92400e" : "#0369a1";
-                badgeHtml = `<span class="status-badge" style="background:${badgeBg}; color:${badgeColor}; font-size:12px; font-weight:600; padding:3px 8px; border-radius:6px;">${occ}% Occupancy</span>`;
+                badgeHtml = `<span class="status-badge" style="background:${badgeBg}; color:${badgeColor}; font-size:12px; font-weight:600; padding:3px 8px; border-radius:6px;">${occ}% Occupancy (${booked}/${cap} booked)</span>`;
             } else {
                 badgeHtml = `<span class="status-badge" style="background:#f1f5f9; color:#475569; font-size:12px; font-weight:600; padding:3px 8px; border-radius:6px;">Pending Allocation</span>`;
             }
@@ -348,9 +375,9 @@ async function loadPassengerDemand() {
             busInfo.style.color = "#334155";
             busInfo.style.fontWeight = "normal";
             if (bus && bus !== "UNASSIGNED") {
-                busInfo.innerHTML = `<strong>Assigned Bus:</strong> ${bus} (${cap} seats)`;
+                busInfo.innerHTML = `<strong>Bus assigned to this trip:</strong> ${bus} (${cap} seats)`;
             } else {
-                busInfo.innerHTML = `<strong>Assigned Bus:</strong> <span style="color:#64748b;">Pending bus allocation</span>`;
+                busInfo.innerHTML = `<strong>Bus assigned to this trip:</strong> <span style="color:#64748b;">Pending bus allocation</span>`;
             }
             demandCard.appendChild(busInfo);
 
@@ -361,11 +388,11 @@ async function loadPassengerDemand() {
             count.style.fontSize = "15px";
 
             const breakdown = [];
-            if (booked > 0 || inquiries === 0) breakdown.push(`${booked} booked`);
-            if (inquiries > 0) breakdown.push(`${inquiries} active inquiries`);
+            breakdown.push(`<strong>${booked}</strong> booked`);
+            if (inquiries > 0) breakdown.push(`<strong>${inquiries}</strong> active inquiries`);
             const sub = breakdown.length > 0 ? ` [${breakdown.join(', ')}]` : '';
 
-            count.innerHTML = `<strong>${total}</strong> passenger(s) registered & travelling${sub}`;
+            count.innerHTML = `<strong>${total}</strong> recorded passenger demand${sub}`;
             demandCard.appendChild(count);
 
             demandList.appendChild(demandCard);
@@ -481,15 +508,28 @@ async function loadAllocatedBuses(routeId) {
         busDetails.hidden = false;
 
         if (!Array.isArray(buses) || buses.length === 0) {
-            busCount.textContent = "No buses currently assigned to route.";
-            busNumbers.textContent = "";
+            busCount.textContent = "No buses currently assigned to this route.";
+            busNumbers.textContent = "-";
+            updateTripBusAssignment();
             return;
         }
 
-        busCount.textContent = `${buses.length} bus(es) allocated`;
-        busNumbers.textContent = buses.map(function (bus) {
-            return `Registration Number: ${bus.registrationNumber}\nActual Capacity: ${bus.capacity}`;
+        // Deduplicate unique buses for route fleet allocation
+        const uniqueBusesMap = new Map();
+        buses.forEach(function (b) {
+            const reg = b.registrationNumber || b.busRegistration;
+            if (reg && !uniqueBusesMap.has(reg)) {
+                uniqueBusesMap.set(reg, b);
+            }
+        });
+        const uniqueBuses = Array.from(uniqueBusesMap.values());
+
+        busCount.textContent = `${uniqueBuses.length} bus(es) allocated to this route (across ${uniqueBuses.length} scheduled departures)`;
+        busNumbers.textContent = uniqueBuses.map(function (bus) {
+            return `Registration Number: ${bus.registrationNumber}\nActual Capacity: ${bus.capacity} seats`;
         }).join("\n\n");
+
+        updateTripBusAssignment();
 
     } catch (error) {
         console.error("Bus loading error:", error);
@@ -537,6 +577,7 @@ routeSelect.addEventListener("change", async function () {
         stopBusPolling();
         routeDetails.hidden = true;
         busDetails.hidden = true;
+        if (tripBusAssignment) tripBusAssignment.textContent = "";
         busCount.textContent = "";
         busNumbers.textContent = "";
         populateDropdown(tripSelect, [], "Choose a scheduled departure");
@@ -838,6 +879,7 @@ function resetBookingForm() {
     busDetails.hidden = true;
     busCount.textContent = "";
     busNumbers.textContent = "";
+    if (tripBusAssignment) tripBusAssignment.textContent = "";
     passengerCount = 1;
     updatePassengerCount();
     stopBusPolling();
