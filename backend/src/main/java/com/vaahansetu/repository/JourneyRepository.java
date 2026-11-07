@@ -262,29 +262,57 @@ public class JourneyRepository {
             return List.of();
         }
 
+        // Route-level demand aggregation. Logic reconciled with findTripPassengerDemand:
+        //   - booked_count = SUM of passenger_count for REGISTERED/BOARDED/COMPLETED
+        //   - inquiry_count = SUM of passenger_count for UNCONFIRMED
+        //   - admin adjustments reported SEPARATELY (routeAdminAdjustment), NOT added to totalDemand
+        //   - totalDemand = booked_count + inquiry_count (no admin adjustments)
+        //   - occupancyPercentage and overcapacity based on total bus capacity assigned to the route
         String sql = """
                 SELECT r.route_id AS "routeId",
                        r.route_code AS "routeCode",
                        r.route_name AS "routeName",
                        r.origin_name AS "originName",
                        r.destination_name AS "destinationName",
-                       COALESCE(j.confirmed_count, 0) AS "confirmedCount",
-                       COALESCE(j.search_count, 0) AS "searchCount",
+                       COALESCE(j.booked_count, 0) AS "confirmedCount",
+                       COALESCE(j.booked_count, 0) AS "bookedCount",
+                       COALESCE(j.booked_count, 0) AS "bookedPassengerCount",
+                       COALESCE(j.inquiry_count, 0) AS "searchCount",
+                       COALESCE(j.inquiry_count, 0) AS "activeInquiryCount",
                        COALESCE(a.adj_count, 0) AS "adjustmentCount",
-                       GREATEST(0, COALESCE(j.confirmed_count, 0) + COALESCE(j.search_count, 0) + COALESCE(a.adj_count, 0)) AS "passengerCount",
-                       GREATEST(0, COALESCE(j.confirmed_count, 0) + COALESCE(j.search_count, 0) + COALESCE(a.adj_count, 0)) AS "totalDemand"
+                       COALESCE(a.adj_count, 0) AS "routeAdminAdjustment",
+                       COALESCE(a.adj_count, 0) AS "routeAdjustmentCount",
+                       COALESCE(b.total_capacity, 0) AS "busCapacity",
+                       COALESCE(b.total_capacity, 0) AS "capacity",
+                       COALESCE(b.bus_count, 0) AS "busCount",
+                       GREATEST(0, COALESCE(j.booked_count, 0) + COALESCE(j.inquiry_count, 0)) AS "passengerCount",
+                       GREATEST(0, COALESCE(j.booked_count, 0) + COALESCE(j.inquiry_count, 0)) AS "totalDemand",
+                       CASE
+                           WHEN COALESCE(b.total_capacity, 0) > 0 THEN
+                               ROUND((COALESCE(j.booked_count, 0)::numeric * 100.0) / b.total_capacity, 1)
+                           ELSE 0.0
+                       END AS "occupancyPercentage",
+                       CASE
+                           WHEN COALESCE(b.total_capacity, 0) > 0 AND COALESCE(j.booked_count, 0) > b.total_capacity THEN TRUE
+                           ELSE FALSE
+                       END AS "overcapacity",
+                       CASE
+                           WHEN COALESCE(b.total_capacity, 0) > 0 AND COALESCE(j.booked_count, 0) > b.total_capacity THEN TRUE
+                           ELSE FALSE
+                       END AS "isOvercapacity"
                 FROM routes r
                 JOIN session_routes sr ON sr.route_id = r.route_id AND sr.session_id = ?
                 LEFT JOIN LATERAL (
                     SELECT
-                        COALESCE(SUM(CASE WHEN pj.journey_status IN ('REGISTERED', 'BOARDED', 'COMPLETED') THEN pj.passenger_count ELSE 0 END), 0) AS confirmed_count,
-                        COALESCE(SUM(CASE WHEN pj.journey_status = 'UNCONFIRMED' THEN pj.passenger_count ELSE 0 END), 0) AS search_count
+                        COALESCE(SUM(CASE WHEN pj.journey_status IN ('REGISTERED', 'BOARDED', 'COMPLETED') THEN pj.passenger_count ELSE 0 END), 0) AS booked_count,
+                        COALESCE(SUM(CASE WHEN pj.journey_status = 'UNCONFIRMED' THEN pj.passenger_count ELSE 0 END), 0) AS inquiry_count
                     FROM passenger_journeys pj
                     JOIN scheduled_trips st ON st.trip_id = pj.trip_id
                     WHERE st.route_id = r.route_id
                       AND (pj.session_id = ? OR ? IS NULL)
                       AND st.service_date = COALESCE(?,
-                            (SELECT started_at::date FROM planning_sessions WHERE status = 'ACTIVE' ORDER BY started_at DESC LIMIT 1),
+                            CURRENT_DATE,
+                            (SELECT MAX(service_date) FROM scheduled_trips WHERE route_id = r.route_id AND service_date >= CURRENT_DATE),
                             (SELECT MAX(service_date) FROM scheduled_trips),
                             CURRENT_DATE)
                 ) j ON TRUE
@@ -298,10 +326,24 @@ public class JourneyRepository {
                         GROUP BY sda.segment_start_stop_id
                     ) sub
                 ) a ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COALESCE(SUM(b2.capacity), 0) AS total_capacity,
+                        COUNT(DISTINCT b2.bus_id) AS bus_count
+                    FROM scheduled_trips st2
+                    JOIN trip_assignments ta2 ON ta2.trip_id = st2.trip_id AND ta2.status = 'ACTIVE'
+                    JOIN buses b2 ON b2.bus_id = ta2.bus_id AND b2.status = 'ACTIVE'
+                    WHERE st2.route_id = r.route_id
+                      AND st2.service_date = COALESCE(?,
+                            CURRENT_DATE,
+                            (SELECT MAX(service_date) FROM scheduled_trips WHERE route_id = r.route_id AND service_date >= CURRENT_DATE),
+                            (SELECT MAX(service_date) FROM scheduled_trips),
+                            CURRENT_DATE)
+                ) b ON TRUE
                 WHERE r.is_active = TRUE
                 ORDER BY r.route_id
                 """;
-        return jdbcTemplate.queryForList(sql, targetSessionId, targetSessionId, targetSessionId, serviceDate, targetSessionId, targetSessionId);
+        return jdbcTemplate.queryForList(sql, targetSessionId, targetSessionId, targetSessionId, serviceDate, targetSessionId, targetSessionId, serviceDate);
     }
 
     // Get passenger demand separated for EACH scheduled trip in the active session and service date
