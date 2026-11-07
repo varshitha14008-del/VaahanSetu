@@ -55,6 +55,7 @@ let currentBusRouteId = null;
 
 let statusPollingTimer = null;
 let activeJourneyId = null;
+let currentInquiryId = null;
 
 // ======================================
 // PASSENGER COUNT
@@ -72,6 +73,9 @@ increasePassengers.addEventListener("click", function () {
     if (passengerCount < 10) {
         passengerCount++;
         updatePassengerCount();
+        if (destinationSelect && destinationSelect.value) {
+            logSearchIntent();
+        }
     }
 });
 
@@ -79,6 +83,9 @@ decreasePassengers.addEventListener("click", function () {
     if (passengerCount > 1) {
         passengerCount--;
         updatePassengerCount();
+        if (destinationSelect && destinationSelect.value) {
+            logSearchIntent();
+        }
     }
 });
 
@@ -408,17 +415,29 @@ async function loadPassengerDemand() {
 async function logSearchIntent() {
     if (!routeSelect.value || !boardingSelect.value || !destinationSelect.value) return;
     try {
-        await fetch(`${API_BASE_URL}/passenger-journeys/intent`, {
+        const payload = {
+            routeId: Number(routeSelect.value),
+            tripId: tripSelect.value ? Number(tripSelect.value) : null,
+            boardingStopId: Number(boardingSelect.value),
+            destinationStopId: Number(destinationSelect.value),
+            passengerCount: passengerCount
+        };
+        if (currentInquiryId) {
+            payload.inquiryId = currentInquiryId;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/passenger-journeys/intent`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                routeId: Number(routeSelect.value),
-                tripId: tripSelect.value ? Number(tripSelect.value) : null,
-                boardingStopId: Number(boardingSelect.value),
-                destinationStopId: Number(destinationSelect.value),
-                passengerCount: passengerCount
-            })
+            body: JSON.stringify(payload)
         });
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data && (data.inquiryId || data.journeyId)) {
+                currentInquiryId = data.inquiryId || data.journeyId;
+            }
+        }
         loadPassengerDemand();
     } catch (e) {
         console.warn('Search intent logging:', e);
@@ -566,6 +585,7 @@ function startBusPolling(routeId) {
 // ======================================
 
 routeSelect.addEventListener("change", async function () {
+    currentInquiryId = null;
     message.textContent = "";
     actionFeedback.textContent = "";
     confirmationCard.hidden = true;
@@ -613,6 +633,7 @@ routeSelect.addEventListener("change", async function () {
 // ======================================
 
 boardingSelect.addEventListener("change", function () {
+    currentInquiryId = null;
     populateDropdown(destinationSelect, [], "Choose destination");
 
     if (!boardingSelect.value || !routeSelect.value) return;
@@ -809,6 +830,9 @@ journeyForm.addEventListener("submit", async function (event) {
     if (tripSelect.value) {
         journeyData.tripId = Number(tripSelect.value);
     }
+    if (currentInquiryId) {
+        journeyData.inquiryId = currentInquiryId;
+    }
 
     const boardingName = boardingSelect.options[boardingSelect.selectedIndex].textContent;
     const destinationName = destinationSelect.options[destinationSelect.selectedIndex].textContent;
@@ -831,6 +855,8 @@ journeyForm.addEventListener("submit", async function (event) {
         if (!response.ok) {
             throw new Error(result.message || "Journey submission failed.");
         }
+
+        currentInquiryId = null;
 
         message.textContent = `Journey registered successfully! Journey ID: ${result.journeyId}.`;
 
@@ -870,6 +896,7 @@ journeyForm.addEventListener("submit", async function (event) {
 // ======================================
 
 function resetBookingForm() {
+    currentInquiryId = null;
     journeyForm.reset();
     routeSelect.value = "";
     populateDropdown(tripSelect, [], "Choose a scheduled departure");

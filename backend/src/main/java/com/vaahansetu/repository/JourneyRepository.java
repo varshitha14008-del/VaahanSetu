@@ -408,6 +408,38 @@ public class JourneyRepository {
 
     // Record passenger travel search intent into common demand
     public Long recordSearchIntent(Long sessionId, Long tripId, Long boardingStopId, Long destinationStopId, Integer count) {
+        return recordSearchIntent(sessionId, tripId, boardingStopId, destinationStopId, count, null);
+    }
+
+    public Long recordSearchIntent(Long sessionId, Long tripId, Long boardingStopId, Long destinationStopId, Integer count, Long inquiryId) {
+        int validCount = count != null && count > 0 ? count : 1;
+
+        if (inquiryId != null) {
+            String updateSql = """
+                    UPDATE passenger_journeys
+                    SET session_id = ?,
+                        trip_id = ?,
+                        boarding_stop_id = ?,
+                        destination_stop_id = ?,
+                        passenger_count = ?,
+                        submitted_at = NOW()
+                    WHERE journey_id = ?
+                      AND journey_status = 'UNCONFIRMED'
+                    """;
+            int rows = jdbcTemplate.update(
+                    updateSql,
+                    sessionId,
+                    tripId,
+                    boardingStopId,
+                    destinationStopId,
+                    validCount,
+                    inquiryId
+            );
+            if (rows > 0) {
+                return inquiryId;
+            }
+        }
+
         String sql = """
                 INSERT INTO passenger_journeys (
                     session_id,
@@ -427,8 +459,38 @@ public class JourneyRepository {
                 tripId,
                 boardingStopId,
                 destinationStopId,
-                count != null && count > 0 ? count : 1
+                validCount
         );
+    }
+
+    // Convert an active UNCONFIRMED inquiry into a confirmed REGISTERED booking
+    public boolean convertInquiryToBooking(Long inquiryId, Long sessionId, Long tripId, Long boardingStopId, Long destinationStopId, Integer passengerCount) {
+        if (inquiryId == null) {
+            return false;
+        }
+        int validCount = passengerCount != null && passengerCount > 0 ? passengerCount : 1;
+        String sql = """
+                UPDATE passenger_journeys
+                SET journey_status = 'REGISTERED',
+                    session_id = ?,
+                    trip_id = ?,
+                    boarding_stop_id = ?,
+                    destination_stop_id = ?,
+                    passenger_count = ?,
+                    submitted_at = NOW()
+                WHERE journey_id = ?
+                  AND journey_status = 'UNCONFIRMED'
+                """;
+        int rows = jdbcTemplate.update(
+                sql,
+                sessionId,
+                tripId,
+                boardingStopId,
+                destinationStopId,
+                validCount,
+                inquiryId
+        );
+        return rows > 0;
     }
 
     // Update the status of a passenger journey

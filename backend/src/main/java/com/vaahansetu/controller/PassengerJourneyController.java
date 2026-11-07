@@ -134,14 +134,33 @@ public class PassengerJourneyController {
             );
         }
 
-        // Save journey in the database
-        Long journeyId = journeyRepository.saveJourney(
-                sessionId,
-                tripId,
-                boardingStopId,
-                destinationStopId,
-                passengerCount
-        );
+        Long requestedInquiryId = toLong(request.get("inquiryId"));
+        Long journeyId = null;
+
+        if (requestedInquiryId != null) {
+            boolean converted = journeyRepository.convertInquiryToBooking(
+                    requestedInquiryId,
+                    sessionId,
+                    tripId,
+                    boardingStopId,
+                    destinationStopId,
+                    passengerCount
+            );
+            if (converted) {
+                journeyId = requestedInquiryId;
+            }
+        }
+
+        if (journeyId == null) {
+            // Save fresh journey in the database
+            journeyId = journeyRepository.saveJourney(
+                    sessionId,
+                    tripId,
+                    boardingStopId,
+                    destinationStopId,
+                    passengerCount
+            );
+        }
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("message", "Your journey has been registered successfully.");
@@ -213,6 +232,7 @@ public class PassengerJourneyController {
                 ? toInteger(request.get("passengerCount"))
                 : toInteger(request.get("passengers"));
         Long tripId = toLong(request.get("tripId"));
+        Long inquiryId = toLong(request.get("inquiryId"));
 
         if (routeId == null || boardingStopId == null || destinationStopId == null) {
             return error(HttpStatus.BAD_REQUEST, "routeId, boardingStopId, and destinationStopId are required.");
@@ -228,10 +248,11 @@ public class PassengerJourneyController {
 
         if (tripId != null) {
             try {
-                Long journeyId = journeyRepository.recordSearchIntent(sessionId, tripId, boardingStopId, destinationStopId, count);
+                Long savedInquiryId = journeyRepository.recordSearchIntent(sessionId, tripId, boardingStopId, destinationStopId, count, inquiryId);
                 return ResponseEntity.ok(Map.of(
                         "status", "SUCCESS",
-                        "journeyId", journeyId,
+                        "journeyId", savedInquiryId,
+                        "inquiryId", savedInquiryId,
                         "message", "Search intent recorded in common demand."
                 ));
             } catch (Exception e) {
