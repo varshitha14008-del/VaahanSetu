@@ -16,7 +16,72 @@ public class RouteRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    // Get all active routes
+    // Get routes for the active planning session (SRS F4 / U2)
+    public List<Map<String, Object>> findRoutesForActiveSession() {
+        return findRoutesBySessionId(null);
+    }
+
+    // Get routes for a specific planning session (or active session if sessionId is null)
+    public List<Map<String, Object>> findRoutesBySessionId(Long sessionId) {
+        String sql;
+        if (sessionId != null) {
+            sql = """
+                    SELECT r.route_id AS "routeId",
+                           r.route_code AS "routeCode",
+                           r.route_name AS "routeName",
+                           r.origin_name AS "originName",
+                           r.origin_name AS "origin",
+                           r.destination_name AS "destinationName",
+                           r.destination_name AS "destination",
+                           r.estimated_duration_minutes AS "estimatedDurationMinutes"
+                    FROM routes r
+                    JOIN session_routes sr ON sr.route_id = r.route_id
+                    WHERE sr.session_id = ?
+                      AND r.is_active = TRUE
+                    ORDER BY r.route_id
+                    """;
+            return jdbcTemplate.queryForList(sql, sessionId);
+        } else {
+            sql = """
+                    SELECT r.route_id AS "routeId",
+                           r.route_code AS "routeCode",
+                           r.route_name AS "routeName",
+                           r.origin_name AS "originName",
+                           r.origin_name AS "origin",
+                           r.destination_name AS "destinationName",
+                           r.destination_name AS "destination",
+                           r.estimated_duration_minutes AS "estimatedDurationMinutes"
+                    FROM routes r
+                    JOIN session_routes sr ON sr.route_id = r.route_id
+                    WHERE sr.session_id = (
+                        SELECT session_id
+                        FROM planning_sessions
+                        WHERE status = 'ACTIVE'
+                        ORDER BY started_at DESC
+                        LIMIT 1
+                    )
+                      AND r.is_active = TRUE
+                    ORDER BY r.route_id
+                    """;
+            return jdbcTemplate.queryForList(sql);
+        }
+    }
+
+    // Check whether a specific route is selected for a planning session
+    public boolean isRouteSelectedForSession(Long sessionId, Long routeId) {
+        if (sessionId == null || routeId == null) {
+            return false;
+        }
+        String sql = """
+                SELECT COUNT(*)
+                FROM session_routes
+                WHERE session_id = ? AND route_id = ?
+                """;
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, sessionId, routeId);
+        return count != null && count > 0;
+    }
+
+    // Get all active master routes (catalog / unfiltered fallback)
     public List<Map<String, Object>> findAllActiveRoutes() {
 
         String sql = """
@@ -24,7 +89,9 @@ public class RouteRepository {
                        route_code AS "routeCode",
                        route_name AS "routeName",
                        origin_name AS "originName",
+                       origin_name AS "origin",
                        destination_name AS "destinationName",
+                       destination_name AS "destination",
                        estimated_duration_minutes AS "estimatedDurationMinutes"
                 FROM routes
                 WHERE is_active = TRUE

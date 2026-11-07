@@ -752,13 +752,17 @@ function renderSessionConfig() {
 
     const selectedRoutes = state.activeSession?.selectedRouteIds || [];
     const selectedBuses = state.activeSession?.selectedBusIds || [];
+    const hasExplicitRouteSelection = state.activeSession && Array.isArray(state.activeSession.selectedRouteIds);
+    const hasExplicitBusSelection = state.activeSession && Array.isArray(state.activeSession.selectedBusIds);
 
     if (routesContainer && state.routes) {
         if (state.routes.length === 0) {
             routesContainer.innerHTML = '<p class="text-muted">No routes available.</p>';
         } else {
             routesContainer.innerHTML = state.routes.map(r => {
-                const isChecked = selectedRoutes.length === 0 || selectedRoutes.includes(r.routeId);
+                const isChecked = hasExplicitRouteSelection
+                    ? selectedRoutes.includes(r.routeId)
+                    : true;
                 const rCode = r.routeCode || r.routeNumber || ('Route #' + r.routeId);
                 const rOrigin = r.originName || r.origin || 'Origin';
                 const rDest = r.destinationName || r.destination || 'Destination';
@@ -779,7 +783,9 @@ function renderSessionConfig() {
             busesContainer.innerHTML = '<p class="text-muted">No buses available.</p>';
         } else {
             busesContainer.innerHTML = state.buses.map(b => {
-                const isChecked = selectedBuses.length === 0 || selectedBuses.includes(b.busId);
+                const isChecked = hasExplicitBusSelection
+                    ? selectedBuses.includes(b.busId)
+                    : true;
                 const bReg = b.registrationNumber || ('Bus #' + b.busId);
                 return `
                 <div class="checkbox-item" style="padding: 6px 0;">
@@ -808,9 +814,9 @@ if (saveSessionConfigBtn) {
         const selectedBuses = Array.from(document.querySelectorAll('.session-bus-check:checked'))
             .map(cb => parseInt(cb.value, 10));
 
-        if (selectedRoutes.length === 0 || selectedBuses.length === 0) {
+        if (selectedBuses.length === 0) {
             if (feedback) {
-                feedback.textContent = 'Please select at least one route and one bus for the session.';
+                feedback.textContent = 'Please select at least one bus for the session.';
                 feedback.className = 'feedback-msg text-danger';
             }
             return;

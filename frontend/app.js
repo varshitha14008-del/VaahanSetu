@@ -115,21 +115,30 @@ async function loadRoutes() {
         );
 
         if (!response.ok) {
-            throw new Error("Could not load routes.");
+            throw new Error(`Server returned HTTP ${response.status}`);
         }
 
         routes = await response.json();
 
         if (!Array.isArray(routes) || routes.length === 0) {
-            message.textContent = "No routes available at the moment.";
+            routes = [];
+            message.textContent = "No routes are currently available for the active planning session.";
             populateDropdown(routeSelect, [], "No routes available");
+            if (routeDetails) routeDetails.hidden = true;
+            if (busDetails) busDetails.hidden = true;
+            populateDropdown(tripSelect, [], "No scheduled departures");
+            populateDropdown(boardingSelect, [], "No stops available");
+            populateDropdown(destinationSelect, [], "No destination available");
             return;
         }
 
         const routeItems = routes.map(function (route) {
+            const rCode = route.routeCode || route.routeName || ('Route #' + route.routeId);
+            const rOrigin = route.originName || route.origin || 'Origin';
+            const rDest = route.destinationName || route.destination || 'Destination';
             return {
                 value: route.routeId,
-                label: `${route.routeCode || route.routeName} (${route.originName} → ${route.destinationName})`
+                label: `${rCode} (${rOrigin} → ${rDest})`
             };
         });
 
@@ -138,8 +147,14 @@ async function loadRoutes() {
 
     } catch (error) {
         console.error("Route loading error:", error);
+        routes = [];
         message.textContent = "Unable to connect to backend service. Please check connection.";
         populateDropdown(routeSelect, [], "Could not load routes");
+        if (routeDetails) routeDetails.hidden = true;
+        if (busDetails) busDetails.hidden = true;
+        populateDropdown(tripSelect, [], "No scheduled departures");
+        populateDropdown(boardingSelect, [], "No stops available");
+        populateDropdown(destinationSelect, [], "No destination available");
     }
 }
 

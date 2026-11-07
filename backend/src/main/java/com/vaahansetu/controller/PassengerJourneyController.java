@@ -118,6 +118,14 @@ public class PassengerJourneyController {
             );
         }
 
+        // Validate that the route is selected and active in this planning session (SRS F4, U2)
+        if (!journeyRepository.isRouteSelectedForSession(sessionId, routeId)) {
+            return error(
+                    HttpStatus.CONFLICT,
+                    "The selected route is not available for registration in the active planning session."
+            );
+        }
+
         // Duplicate submission prevention within 2-minute window (SRS F9, NFR-S7)
         if (journeyRepository.isDuplicateJourney(sessionId, tripId, boardingStopId, destinationStopId, passengerCount)) {
             return error(

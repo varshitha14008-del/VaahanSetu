@@ -65,6 +65,79 @@ public class AdminController {
         return ResponseEntity.ok(Map.of("message", "Session selection saved successfully."));
     }
 
+    @PostMapping("/sessions")
+    public ResponseEntity<?> createSession(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @RequestBody(required = false) Map<String, Object> body) {
+
+        Map<String, Object> userSession = authService.validate(AuthController.extractToken(auth));
+        if (userSession == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Authentication required. Please log in."));
+        }
+        String role = (String) userSession.get("role");
+        if (!"ADMIN".equalsIgnoreCase(role)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Only administrators can create planning sessions."));
+        }
+
+        String name = "Session " + System.currentTimeMillis();
+        if (body != null && body.get("sessionName") != null && !body.get("sessionName").toString().isBlank()) {
+            name = body.get("sessionName").toString().trim();
+        }
+
+        long newSessionId = officerService.createNewActiveSession(name);
+
+        if (body != null && body.get("routeIds") != null) {
+            @SuppressWarnings("unchecked")
+            List<?> rawRoutes = (List<?>) body.get("routeIds");
+            @SuppressWarnings("unchecked")
+            List<?> rawBuses = body.get("busIds") != null ? (List<?>) body.get("busIds") : List.of();
+
+            List<Long> routeIds = rawRoutes.stream()
+                    .filter(v -> v != null)
+                    .map(v -> Long.parseLong(v.toString().trim()))
+                    .toList();
+            List<Long> busIds = rawBuses.stream()
+                    .filter(v -> v != null)
+                    .map(v -> Long.parseLong(v.toString().trim()))
+                    .toList();
+
+            officerService.saveSelection(newSessionId, routeIds, busIds);
+        }
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                "message", "New planning session created and activated.",
+                "sessionId", newSessionId,
+                "sessionName", name,
+                "status", "ACTIVE"
+        ));
+    }
+
+    @PutMapping("/sessions/{sessionId}/activate")
+    public ResponseEntity<?> activateSession(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @PathVariable long sessionId) {
+
+        Map<String, Object> userSession = authService.validate(AuthController.extractToken(auth));
+        if (userSession == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Authentication required. Please log in."));
+        }
+        String role = (String) userSession.get("role");
+        if (!"ADMIN".equalsIgnoreCase(role)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Only administrators can activate planning sessions."));
+        }
+
+        officerService.activateSession(sessionId);
+        return ResponseEntity.ok(Map.of(
+                "message", "Planning session " + sessionId + " activated successfully.",
+                "sessionId", sessionId,
+                "status", "ACTIVE"
+        ));
+    }
+
     @PostMapping({"/demand/adjust", "/simulation/step"})
     public ResponseEntity<?> adjustDemand(
             @RequestHeader(value = "Authorization", required = false) String auth,

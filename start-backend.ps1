@@ -23,7 +23,9 @@ try {
 # Locate Maven
 $mvnCmd = "mvn"
 if (-not (Get-Command mvn -ErrorAction SilentlyContinue)) {
-    if (Test-Path "C:\Program Files\apache-maven-3.10.0\bin\mvn.cmd") {
+    if (Test-Path "C:\Users\varsh\.gemini\antigravity\scratch\apache-maven\apache-maven-3.9.6\bin\mvn.cmd") {
+        $mvnCmd = "C:\Users\varsh\.gemini\antigravity\scratch\apache-maven\apache-maven-3.9.6\bin\mvn.cmd"
+    } elseif (Test-Path "C:\Program Files\apache-maven-3.10.0\bin\mvn.cmd") {
         $mvnCmd = "C:\Program Files\apache-maven-3.10.0\bin\mvn.cmd"
     } elseif (Test-Path "C:\apache-maven-3.10.0\bin\mvn.cmd") {
         $mvnCmd = "C:\apache-maven-3.10.0\bin\mvn.cmd"

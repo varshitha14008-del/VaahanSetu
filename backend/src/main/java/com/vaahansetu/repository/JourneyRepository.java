@@ -118,6 +118,20 @@ public class JourneyRepository {
         return sessions.isEmpty() ? null : sessions.get(0);
     }
 
+    // Check whether a specific route is selected for a planning session
+    public boolean isRouteSelectedForSession(Long sessionId, Long routeId) {
+        if (sessionId == null || routeId == null) {
+            return false;
+        }
+        String sql = """
+                SELECT COUNT(*)
+                FROM session_routes
+                WHERE session_id = ? AND route_id = ?
+                """;
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, sessionId, routeId);
+        return count != null && count > 0;
+    }
+
     // Get active stops belonging to the selected route in sequence
     public List<Long> findStopOrder(Long routeId) {
 
@@ -236,6 +250,11 @@ public class JourneyRepository {
     }
 
     public List<Map<String, Object>> findPassengerDemand(Long sessionId, LocalDate serviceDate) {
+        Long targetSessionId = sessionId != null ? sessionId : findActiveSessionId();
+        if (targetSessionId == null) {
+            return List.of();
+        }
+
         String sql = """
                 SELECT r.route_id AS "routeId",
                        r.route_code AS "routeCode",
@@ -248,6 +267,7 @@ public class JourneyRepository {
                        GREATEST(0, COALESCE(j.confirmed_count, 0) + COALESCE(j.search_count, 0) + COALESCE(a.adj_count, 0)) AS "passengerCount",
                        GREATEST(0, COALESCE(j.confirmed_count, 0) + COALESCE(j.search_count, 0) + COALESCE(a.adj_count, 0)) AS "totalDemand"
                 FROM routes r
+                JOIN session_routes sr ON sr.route_id = r.route_id AND sr.session_id = ?
                 LEFT JOIN LATERAL (
                     SELECT
                         COALESCE(SUM(CASE WHEN pj.journey_status IN ('REGISTERED', 'BOARDED', 'COMPLETED') THEN pj.passenger_count ELSE 0 END), 0) AS confirmed_count,
@@ -274,7 +294,7 @@ public class JourneyRepository {
                 WHERE r.is_active = TRUE
                 ORDER BY r.route_id
                 """;
-        return jdbcTemplate.queryForList(sql, sessionId, sessionId, serviceDate, sessionId, sessionId);
+        return jdbcTemplate.queryForList(sql, targetSessionId, targetSessionId, targetSessionId, serviceDate, targetSessionId, targetSessionId);
     }
 
     // Record passenger travel search intent into common demand

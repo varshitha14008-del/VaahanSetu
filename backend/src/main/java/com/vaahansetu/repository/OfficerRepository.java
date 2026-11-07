@@ -6,6 +6,7 @@ import java.util.*;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Database queries supporting the officer console REST endpoints.
@@ -47,6 +48,23 @@ public class OfficerRepository {
         if (session == null) return null;
         Object id = session.get("sessionId");
         return id == null ? null : ((Number) id).longValue();
+    }
+
+    @Transactional
+    public long createNewActiveSession(String name) {
+        jdbcTemplate.update("UPDATE planning_sessions SET status = 'CLOSED', ended_at = NOW() WHERE status = 'ACTIVE'");
+        String sql = """
+                INSERT INTO planning_sessions (session_name, status, started_at)
+                VALUES (?, 'ACTIVE', NOW())
+                RETURNING session_id
+                """;
+        return jdbcTemplate.queryForObject(sql, Long.class, name);
+    }
+
+    @Transactional
+    public void activateSession(long sessionId) {
+        jdbcTemplate.update("UPDATE planning_sessions SET status = 'CLOSED', ended_at = NOW() WHERE status = 'ACTIVE'");
+        jdbcTemplate.update("UPDATE planning_sessions SET status = 'ACTIVE', ended_at = NULL WHERE session_id = ?", sessionId);
     }
 
     public LocalDate findActiveSessionDate() {

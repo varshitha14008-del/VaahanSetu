@@ -179,6 +179,16 @@ public class OfficerService {
         repo.saveSessionSelection(sessionId, routeIds, busIds);
     }
 
+    @Transactional
+    public long createNewActiveSession(String name) {
+        return repo.createNewActiveSession(name);
+    }
+
+    @Transactional
+    public void activateSession(long sessionId) {
+        repo.activateSession(sessionId);
+    }
+
     // ----------------------------------------------------------------
     // Allocation run + persistence
     // ----------------------------------------------------------------

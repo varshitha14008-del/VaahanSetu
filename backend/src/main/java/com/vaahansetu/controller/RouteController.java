@@ -28,10 +28,18 @@ public class RouteController {
         this.journeyRepository = journeyRepository;
     }
 
-    // Get all active routes
+    // Get routes for the active planning session (or specified session)
     @GetMapping("/routes")
-    public List<Map<String, Object>> getRoutes() {
-        return routeRepository.findAllActiveRoutes();
+    public List<Map<String, Object>> getRoutes(
+            @RequestParam(required = false) Long sessionId,
+            @RequestParam(required = false, defaultValue = "false") boolean all) {
+        if (all) {
+            return routeRepository.findAllActiveRoutes();
+        }
+        if (sessionId != null) {
+            return routeRepository.findRoutesBySessionId(sessionId);
+        }
+        return routeRepository.findRoutesForActiveSession();
     }
 
     // Get stops for a selected route
