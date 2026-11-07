@@ -1,5 +1,6 @@
 package com.vaahansetu.service;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,10 @@ public class JourneyService {
 
     public List<Map<String, Object>> getPassengerDemand(Long sessionId) {
         return journeyRepository.findPassengerDemand(sessionId);
+    }
+
+    public List<Map<String, Object>> getTripPassengerDemand(Long sessionId, Long routeId, LocalDate serviceDate) {
+        return journeyRepository.findTripPassengerDemand(sessionId, routeId, serviceDate);
     }
 
     public int updateStatus(Long journeyId, String status) {

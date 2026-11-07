@@ -205,14 +205,21 @@ async function loadScheduledTrips(routeId) {
 }
 
 // ======================================
-// LOAD PASSENGER DEMAND
+// LOAD PASSENGER DEMAND (PER SCHEDULED TRIP)
 // ======================================
 
 async function loadPassengerDemand() {
     try {
-        const dateParam = travelDate && travelDate.value ? `?date=${encodeURIComponent(travelDate.value)}` : "";
+        const params = new URLSearchParams();
+        if (travelDate && travelDate.value) {
+            params.append("date", travelDate.value);
+        }
+        if (routeSelect && routeSelect.value) {
+            params.append("routeId", routeSelect.value);
+        }
+        const queryString = params.toString() ? `?${params.toString()}` : "";
         const response = await fetch(
-            `${API_BASE_URL}/passenger-journeys/demand${dateParam}`,
+            `${API_BASE_URL}/passenger-journeys/trips/demand${queryString}`,
             { cache: "no-store" }
         );
 
@@ -224,42 +231,143 @@ async function loadPassengerDemand() {
         demandList.replaceChildren();
 
         if (!Array.isArray(demandData) || demandData.length === 0) {
-            demandList.hidden = true;
+            if (routeSelect && routeSelect.value) {
+                demandList.hidden = false;
+                const emptyCard = document.createElement("div");
+                emptyCard.className = "demand-item";
+                emptyCard.style.textAlign = "center";
+                emptyCard.style.color = "#64748b";
+                emptyCard.style.background = "#f8fafc";
+                emptyCard.style.borderColor = "#cbd5e1";
+                emptyCard.innerHTML = "<p style='color: #64748b; font-weight: normal; margin: 0;'>No scheduled departures found for this route on the selected date.</p>";
+                demandList.appendChild(emptyCard);
+            } else {
+                demandList.hidden = true;
+            }
             return;
         }
 
         demandList.hidden = false;
 
-        demandData.forEach(function (item) {
-            const route = routes.find(function (r) {
-                return Number(r.routeId) === Number(item.routeId);
-            });
+        // If any displayed routes have route-level adjustments, display them separately ONCE per route
+        const routesWithAdjustments = [];
+        const seenRouteIds = new Set();
+        demandData.forEach(function (t) {
+            const adj = t.routeAdminAdjustment != null ? t.routeAdminAdjustment : (t.routeAdjustmentCount || 0);
+            if (adj !== 0 && !seenRouteIds.has(t.routeId)) {
+                seenRouteIds.add(t.routeId);
+                routesWithAdjustments.push({
+                    routeId: t.routeId,
+                    routeCode: t.routeCode || t.routeName || `Route #${t.routeId}`,
+                    adj: adj
+                });
+            }
+        });
 
-            const routeTitle = (route && (route.routeCode || route.routeName))
-                ? `${route.routeCode || route.routeName} (${route.originName} → ${route.destinationName})`
-                : (item.routeCode ? `${item.routeCode} (${item.originName} → ${item.destinationName})` : `Route ID: ${item.routeId}`);
+        if (routesWithAdjustments.length > 0) {
+            const adjBanner = document.createElement("div");
+            adjBanner.className = "route-adjustment-banner";
+            adjBanner.style.background = "#f0fdfa";
+            adjBanner.style.border = "1px dashed #0d9488";
+            adjBanner.style.borderRadius = "10px";
+            adjBanner.style.padding = "10px 14px";
+            adjBanner.style.fontSize = "13px";
+            adjBanner.style.color = "#0f766e";
+            adjBanner.style.fontWeight = "500";
+            const adjDetails = routesWithAdjustments.map(function (r) {
+                return `<strong>${r.routeCode}</strong>: ${r.adj > 0 ? '+' : ''}${r.adj} route-level adjustment`;
+            }).join(" | ");
+            adjBanner.innerHTML = `<strong>Route-Level Adjustments:</strong> ${adjDetails} (applied across route segments, separate from individual departures).`;
+            demandList.appendChild(adjBanner);
+        }
 
-            const total = item.totalDemand != null ? item.totalDemand : item.passengerCount;
-            if (total === 0 && !route) return;
+        demandData.forEach(function (trip) {
+            const tripId = trip.scheduledTripId || trip.tripId;
+            const rCode = trip.routeCode || trip.routeName || `Route #${trip.routeId}`;
+            const rOrigin = trip.originName || "Origin";
+            const rDest = trip.destinationName || "Destination";
+            const depTime = trip.departureTimeFormatted || (trip.departureTime ? trip.departureTime.substring(11, 16) : "--:--");
+            const arrTime = trip.arrivalTimeFormatted || (trip.arrivalTime ? trip.arrivalTime.substring(11, 16) : "--:--");
+            
+            const total = trip.totalDemand != null ? trip.totalDemand : (trip.passengerCount || 0);
+            const booked = trip.bookedPassengerCount != null ? trip.bookedPassengerCount : (trip.bookedCount || 0);
+            const inquiries = trip.activeInquiryCount != null ? trip.activeInquiryCount : (trip.searchCount || 0);
+            const bus = trip.assignedBus || trip.busRegistration;
+            const cap = trip.busCapacity != null ? trip.busCapacity : (trip.capacity || 0);
+            const occ = trip.occupancyPercentage != null ? trip.occupancyPercentage : 0;
+            const isOvercap = trip.overcapacity === true || trip.isOvercapacity === true;
 
             const demandCard = document.createElement("div");
-            demandCard.className = "demand-item";
+            demandCard.className = "demand-item trip-demand-card";
+
+            // Trip Header: Departure Time, Route Code, and Occupancy Badge
+            const header = document.createElement("div");
+            header.style.display = "flex";
+            header.style.justifyContent = "space-between";
+            header.style.alignItems = "center";
+            header.style.flexWrap = "wrap";
+            header.style.gap = "8px";
+            header.style.marginBottom = "8px";
 
             const title = document.createElement("h3");
-            title.textContent = routeTitle;
+            title.style.margin = "0";
+            title.style.fontSize = "16px";
+            title.textContent = `Departure: ${depTime} - ${arrTime} (${rCode})`;
 
+            let badgeHtml = "";
+            if (isOvercap) {
+                badgeHtml = `<span class="status-badge" style="background:#fee2e2; color:#991b1b; font-size:12px; font-weight:600; padding:3px 8px; border-radius:6px;">Overcapacity (${occ}%)</span>`;
+            } else if (cap > 0) {
+                const badgeBg = occ > 75 ? "#fef3c7" : "#e0f2fe";
+                const badgeColor = occ > 75 ? "#92400e" : "#0369a1";
+                badgeHtml = `<span class="status-badge" style="background:${badgeBg}; color:${badgeColor}; font-size:12px; font-weight:600; padding:3px 8px; border-radius:6px;">${occ}% Occupancy</span>`;
+            } else {
+                badgeHtml = `<span class="status-badge" style="background:#f1f5f9; color:#475569; font-size:12px; font-weight:600; padding:3px 8px; border-radius:6px;">Pending Allocation</span>`;
+            }
+
+            const badgeSpan = document.createElement("div");
+            badgeSpan.innerHTML = badgeHtml;
+
+            header.appendChild(title);
+            header.appendChild(badgeSpan);
+            demandCard.appendChild(header);
+
+            // Route info subheader
+            const routeSub = document.createElement("p");
+            routeSub.style.margin = "0 0 6px 0";
+            routeSub.style.fontSize = "13px";
+            routeSub.style.color = "#64748b";
+            routeSub.style.fontWeight = "normal";
+            routeSub.textContent = `${rOrigin} → ${rDest}`;
+            demandCard.appendChild(routeSub);
+
+            // Bus Assignment info
+            const busInfo = document.createElement("p");
+            busInfo.style.margin = "0 0 8px 0";
+            busInfo.style.fontSize = "13px";
+            busInfo.style.color = "#334155";
+            busInfo.style.fontWeight = "normal";
+            if (bus && bus !== "UNASSIGNED") {
+                busInfo.innerHTML = `<strong>Assigned Bus:</strong> ${bus} (${cap} seats)`;
+            } else {
+                busInfo.innerHTML = `<strong>Assigned Bus:</strong> <span style="color:#64748b;">Pending bus allocation</span>`;
+            }
+            demandCard.appendChild(busInfo);
+
+            // Demand Count with breakdown (strictly trip-level booked & inquiry passengers)
             const count = document.createElement("p");
             count.className = "passenger-count";
-            
-            const breakdown = [];
-            if (item.confirmedCount) breakdown.push(`${item.confirmedCount} booked`);
-            if (item.searchCount) breakdown.push(`${item.searchCount} active inquiries`);
-            if (item.adjustmentCount) breakdown.push(`${item.adjustmentCount > 0 ? '+' : ''}${item.adjustmentCount} admin adj`);
-            const sub = breakdown.length > 0 ? ` [${breakdown.join(', ')}]` : '';
-            count.textContent = `${total} passenger(s) registered & traveling${sub}`;
+            count.style.margin = "0";
+            count.style.fontSize = "15px";
 
-            demandCard.appendChild(title);
+            const breakdown = [];
+            if (booked > 0 || inquiries === 0) breakdown.push(`${booked} booked`);
+            if (inquiries > 0) breakdown.push(`${inquiries} active inquiries`);
+            const sub = breakdown.length > 0 ? ` [${breakdown.join(', ')}]` : '';
+
+            count.innerHTML = `<strong>${total}</strong> passenger(s) registered & travelling${sub}`;
             demandCard.appendChild(count);
+
             demandList.appendChild(demandCard);
         });
 
@@ -743,6 +851,7 @@ if (newBookingBtn) {
         message.textContent = "";
         actionFeedback.textContent = "";
         resetBookingForm();
+        loadPassengerDemand();
     });
 }
 

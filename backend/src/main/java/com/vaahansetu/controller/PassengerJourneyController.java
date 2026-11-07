@@ -170,7 +170,7 @@ public class PassengerJourneyController {
         return ResponseEntity.ok(journey);
     }
 
-    // Get common passenger demand for the active planning session and date
+    // Get common passenger demand for the active planning session and date (route-level aggregation)
     @GetMapping("/demand")
     public ResponseEntity<List<Map<String, Object>>> getPassengerDemand(
             @RequestParam(required = false)
@@ -178,6 +178,18 @@ public class PassengerJourneyController {
 
         Long sessionId = journeyRepository.findActiveSessionId();
         List<Map<String, Object>> demand = journeyRepository.findPassengerDemand(sessionId, date);
+        return ResponseEntity.ok(demand != null ? demand : List.of());
+    }
+
+    // Get passenger demand separated for EACH scheduled trip in the active planning session and date
+    @GetMapping("/trips/demand")
+    public ResponseEntity<List<Map<String, Object>>> getTripPassengerDemand(
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) Long routeId) {
+
+        Long sessionId = journeyRepository.findActiveSessionId();
+        List<Map<String, Object>> demand = journeyRepository.findTripPassengerDemand(sessionId, routeId, date);
         return ResponseEntity.ok(demand != null ? demand : List.of());
     }
 
