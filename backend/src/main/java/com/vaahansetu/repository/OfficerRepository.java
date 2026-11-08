@@ -670,7 +670,7 @@ public class OfficerRepository {
         String busSql = "SELECT bus_id AS \"busId\", registration_number AS \"registrationNumber\", " +
                 "capacity AS \"capacity\", status AS \"status\", " +
                 "rest_duration_minutes AS \"restDurationMinutes\", " +
-                "rest_start_time AS \"restStartTime\", rest_end_time AS \"restEndTime\" " +
+                "rest_start AS \"restStartTime\", rest_end AS \"restEndTime\" " +
                 "FROM buses WHERE bus_id IN (" + inPlaceholders + ") ORDER BY bus_id FOR UPDATE";
         List<Map<String, Object>> busRows = jdbcTemplate.queryForList(busSql, sortedBusIds.toArray());
 

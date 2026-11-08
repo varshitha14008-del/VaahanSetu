@@ -39,7 +39,10 @@ to your local DB.
 | # | File | Description | Date |
 |---|------|-------------|------|
 | 001 | `001_add_rest_slots_to_buses.sql` | Added `rest_start` and `rest_end` (TIME, NULL) to `buses` for daily rest-slot windows. Backfilled sample data. | 2026-10-30 |
-| 005 | `005_multi_bus_trip_assignments.sql` | Added `allocation_assignment_buses` child table and updated `trip_assignments` active index to support multiple active buses per trip. | 2026-11-08 |
+| 002 | `002_add_simulation_elapsed_minutes.sql` | Added `simulation_elapsed_minutes` (INTEGER, NOT NULL DEFAULT 0) to `planning_sessions` for simulation clock tracking per SRS F18. | 2026-11-01 |
+| 003 | `003_expand_master_data.sql` | Master data expansion: populated real TSRTC network (20 buses, 365 stops, 24 routes, 90 scheduled trips, assignments, 66 journeys). | 2026-11-02 |
+| 004 | `004_overcrowding_undercrowding.sql` | Added sample passenger journeys with overcrowding (>60 seats) and undercrowding to validate allocation optimization. | 2026-11-04 |
+| 005 | `005_multi_bus_trip_assignments.sql` | Added `allocation_assignment_buses` child table, backfilled proposed buses, and updated `trip_assignments` active index to support multiple active buses per trip. | 2026-11-08 |
 | 006 | `006_trip_specific_demand_adjustments.sql` | Added nullable `trip_id` column and indexes to `segment_demand_adjustments` for trip-specific administrative demand management. | 2026-11-08 |
 
 ## Conventions

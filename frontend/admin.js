@@ -20,6 +20,147 @@ const state = {
     routes: []
 };
 
+// Request sequence tracking to guard against race conditions and stale responses
+const reqSequence = {
+    session: 0,
+    buses: 0,
+    routes: 0,
+    trips: 0,
+    tripDemand: 0,
+    demandBreakdown: 0
+};
+
+/**
+ * Sanitizes error messages to prevent leaking credentials, connection strings, or raw stack traces.
+ * @param {string} msg
+ * @returns {string}
+ */
+function sanitizeErrorMessage(msg) {
+    if (!msg || typeof msg !== 'string') return '';
+    if (/password|secret|token|credentials|jdbc:|postgresql:\/\//i.test(msg)) {
+        return 'An internal database or server error occurred. Please contact the system administrator.';
+    }
+    if (msg.length > 250) {
+        return msg.substring(0, 247) + '...';
+    }
+    return msg;
+}
+
+/**
+ * Formats caught errors into clear, administrator-friendly messages.
+ * @param {Error|any} err
+ * @param {string} fallback
+ * @returns {string}
+ */
+function formatErrorMessage(err, fallback = 'An unexpected error occurred.') {
+    if (!err) return fallback;
+    if (err.isTimeout || err.name === 'TimeoutError') {
+        return err.message;
+    }
+    if (err.isNetworkError || err.name === 'NetworkError' || err.message === 'Failed to fetch') {
+        return `Unable to connect to backend server (${API_BASE}). The server may be waking up (Render cold start) or offline. Please check your connection or retry in a moment.`;
+    }
+    if (err.message) {
+        return sanitizeErrorMessage(err.message);
+    }
+    return fallback;
+}
+
+/**
+ * Extracts and sanitizes error information from an HTTP error response.
+ * @param {Response} res
+ * @param {string} fallback
+ * @returns {Promise<string>}
+ */
+async function parseErrorResponse(res, fallback = `Server returned HTTP ${res.status}`) {
+    let serverMsg = '';
+    try {
+        const data = await res.json();
+        if (data && typeof data.message === 'string' && data.message.trim()) {
+            serverMsg = sanitizeErrorMessage(data.message.trim());
+        } else if (data && typeof data.error === 'string' && data.error.trim()) {
+            serverMsg = sanitizeErrorMessage(data.error.trim());
+        }
+    } catch (_) {
+        // Response is not JSON (e.g. gateway timeout HTML)
+    }
+
+    if (res.status === 401) {
+        return 'Session expired or unauthorized. Please log in again.';
+    }
+    if (res.status === 403) {
+        return 'Access denied: Administrator privileges required.';
+    }
+    if (res.status === 404) {
+        return serverMsg ? `Resource not found: ${serverMsg}` : 'Requested resource was not found on the server (HTTP 404).';
+    }
+    if (res.status === 409) {
+        return serverMsg ? `Conflict: ${serverMsg}` : 'Conflict occurred with current server state (HTTP 409).';
+    }
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+        return `Server is temporarily unavailable (HTTP ${res.status}). It may be waking up from a cold start. Please retry in a few moments.`;
+    }
+    if (res.status >= 500) {
+        return serverMsg ? `Server error (HTTP ${res.status}): ${serverMsg}` : `Server error (HTTP ${res.status}). Please check backend logs or retry.`;
+    }
+    return serverMsg ? `Error (HTTP ${res.status}): ${serverMsg}` : `${fallback} (HTTP ${res.status})`;
+}
+
+/**
+ * Executes a fetch request with an AbortController timeout.
+ * @param {string} url - Request URL
+ * @param {RequestInit} [options={}] - Fetch options
+ * @param {number} [timeoutMs=60000] - Timeout in milliseconds (default 60s)
+ * @returns {Promise<Response>}
+ */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 60000) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+        controller.abort();
+    }, timeoutMs);
+
+    // If caller provided an external signal, propagate abort
+    const callerSignal = options.signal;
+    let abortHandler = null;
+    if (callerSignal) {
+        if (callerSignal.aborted) {
+            clearTimeout(timeoutId);
+            controller.abort();
+        } else {
+            abortHandler = () => controller.abort();
+            callerSignal.addEventListener('abort', abortHandler, { once: true });
+        }
+    }
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+        return response;
+    } catch (err) {
+        if (err.name === 'AbortError' || controller.signal.aborted) {
+            const timeoutSeconds = Math.round(timeoutMs / 1000);
+            const timeoutError = new Error(`Request timed out after ${timeoutSeconds}s. The server may be waking up (cold start) or processing heavy load. Please retry in a moment.`);
+            timeoutError.name = 'TimeoutError';
+            timeoutError.isTimeout = true;
+            throw timeoutError;
+        }
+        if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+            const netError = new Error(`Unable to connect to the backend server. Please verify network connectivity and that the server is online.`);
+            netError.name = 'NetworkError';
+            netError.isNetworkError = true;
+            throw netError;
+        }
+        throw err;
+    } finally {
+        clearTimeout(timeoutId);
+        if (callerSignal && abortHandler) {
+            callerSignal.removeEventListener('abort', abortHandler);
+        }
+    }
+}
+
 function formatMinutesToTime(mins) {
     const h = Math.floor(mins / 60) % 24;
     const m = mins % 60;
@@ -98,15 +239,16 @@ if (adminLoginForm) {
         if (submitBtn) submitBtn.disabled = true;
 
         try {
-            const res = await fetch(`${API_BASE}/auth/login`, {
+            const res = await fetchWithTimeout(`${API_BASE}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
-            });
+            }, 60000);
 
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                throw new Error(data.message || `Login failed (HTTP ${res.status})`);
+                const errMsg = data.message || `Login failed (HTTP ${res.status})`;
+                throw new Error(errMsg);
             }
 
             const role = (data.role || '').toUpperCase();
@@ -131,10 +273,8 @@ if (adminLoginForm) {
             showDashboard();
         } catch (err) {
             if (feedback) {
-                const msg = err.message === 'Failed to fetch'
-                    ? `Unable to connect to backend server at ${API_BASE}. Please ensure the backend is running.`
-                    : `Login failed: ${err.message}`;
-                feedback.textContent = msg;
+                const userMsg = formatErrorMessage(err, 'Login failed');
+                feedback.textContent = userMsg.startsWith('Login failed') ? userMsg : `Login failed: ${userMsg}`;
                 feedback.className = 'feedback-msg text-danger';
             }
         } finally {
@@ -181,10 +321,17 @@ function initTabs() {
     });
 }
 
-// Initial Data Load
+// Initial Data Load - Decoupled to allow independent loading and partial availability
 async function initDashboard() {
-    await fetchActiveSession();
-    await Promise.all([
+    try {
+        await fetchActiveSession();
+    } catch (e) {
+        console.warn('Active session sync failed during init:', e);
+    }
+
+    // Load buses, routes, and trips in parallel using Promise.allSettled
+    // so a slow or failing endpoint does not block or cancel the others
+    await Promise.allSettled([
         fetchBuses(),
         fetchRoutes(),
         fetchTrips()
@@ -194,26 +341,26 @@ async function initDashboard() {
 
 // Fetch Active Session Clock & Details
 async function fetchActiveSession() {
+    const reqId = ++reqSequence.session;
     try {
-        const res = await fetch(`${API_BASE}/officer/sessions/active`, {
+        const res = await fetchWithTimeout(`${API_BASE}/officer/sessions/active`, {
             headers: getAuthHeaders()
-        });
+        }, 60000);
         if (res.ok) {
             const session = await res.json();
+            if (reqId !== reqSequence.session) return;
             state.activeSession = session;
-            if (session) {
-                if (session.startedAt) {
-                    try {
-                        const dateStr = session.startedAt.substring(0, 10);
-                        const dateFilter = document.getElementById('tripDateFilter');
-                        if (dateFilter && !dateFilter.value) {
-                            dateFilter.value = dateStr;
-                        }
-                        const statDateEl = document.getElementById('statServiceDate');
-                        if (statDateEl) statDateEl.textContent = dateStr;
-                    } catch (e) {
-                        console.warn('Could not parse session startedAt:', e);
+            if (session && session.startedAt) {
+                try {
+                    const dateStr = session.startedAt.substring(0, 10);
+                    const dateFilter = document.getElementById('tripDateFilter');
+                    if (dateFilter && !dateFilter.value) {
+                        dateFilter.value = dateStr;
                     }
+                    const statDateEl = document.getElementById('statServiceDate');
+                    if (statDateEl) statDateEl.textContent = dateStr;
+                } catch (e) {
+                    console.warn('Could not parse session startedAt:', e);
                 }
             }
         }
@@ -224,14 +371,19 @@ async function fetchActiveSession() {
 
 // Fetch Buses
 async function fetchBuses() {
+    const reqId = ++reqSequence.buses;
     const tbody = document.querySelector('#busesTable tbody');
     if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center">Loading fleet data...</td></tr>';
     try {
-        const res = await fetch(`${API_BASE}/officer/buses`, {
+        const res = await fetchWithTimeout(`${API_BASE}/officer/buses`, {
             headers: getAuthHeaders()
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        }, 60000);
+        if (!res.ok) {
+            const errMsg = await parseErrorResponse(res, 'Failed to fetch buses');
+            throw new Error(errMsg);
+        }
         const buses = await res.json();
+        if (reqId !== reqSequence.buses) return;
         state.buses = buses;
         const statBusEl = document.getElementById('statBusCount');
         if (statBusEl) statBusEl.textContent = buses.length;
@@ -267,28 +419,57 @@ async function fetchBuses() {
             `;
         }).join('');
     } catch (err) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error loading buses: ${err.message}</td></tr>`;
+        if (reqId !== reqSequence.buses) return;
+        const userMsg = formatErrorMessage(err, 'Error loading buses');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center text-danger" style="padding: 1.25rem;">
+                        <p style="margin-bottom: 0.5rem;"><strong>Failed to load fleet data:</strong> ${userMsg}</p>
+                        <button type="button" class="action-btn-small" onclick="fetchBuses()">&#x21bb; Retry Fleet</button>
+                    </td>
+                </tr>
+            `;
+        }
     }
 }
 
 // Fetch Routes
 async function fetchRoutes() {
+    const reqId = ++reqSequence.routes;
+    const routesContainer = document.getElementById('sessionRoutesList');
     try {
-        const res = await fetch(`${API_BASE}/officer/routes`, {
+        const res = await fetchWithTimeout(`${API_BASE}/officer/routes`, {
             headers: getAuthHeaders()
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        }, 60000);
+        if (!res.ok) {
+            const errMsg = await parseErrorResponse(res, 'Failed to fetch routes');
+            throw new Error(errMsg);
+        }
         const routes = await res.json();
+        if (reqId !== reqSequence.routes) return;
         state.routes = routes;
         const statRouteEl = document.getElementById('statRouteCount');
         if (statRouteEl) statRouteEl.textContent = routes.length;
+        renderSessionConfig();
     } catch (err) {
+        if (reqId !== reqSequence.routes) return;
         console.error('Failed to fetch routes:', err);
+        const userMsg = formatErrorMessage(err, 'Failed to load routes');
+        if (routesContainer) {
+            routesContainer.innerHTML = `
+                <div class="text-danger" style="padding: 0.75rem 0;">
+                    <p style="margin-bottom: 0.5rem;"><strong>Error loading routes:</strong> ${userMsg}</p>
+                    <button type="button" class="action-btn-small" onclick="fetchRoutes()">&#x21bb; Retry Routes</button>
+                </div>
+            `;
+        }
     }
 }
 
 // Fetch Trips
 async function fetchTrips() {
+    const reqId = ++reqSequence.trips;
     const filterEl = document.getElementById('tripDateFilter');
     let dateInput = filterEl ? filterEl.value : '';
     if (!dateInput && state.activeSession && state.activeSession.startedAt) {
@@ -305,11 +486,15 @@ async function fetchTrips() {
 
     try {
         const url = dateInput ? `${API_BASE}/officer/trips?date=${encodeURIComponent(dateInput)}` : `${API_BASE}/officer/trips`;
-        const res = await fetch(url, {
+        const res = await fetchWithTimeout(url, {
             headers: getAuthHeaders()
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        }, 60000);
+        if (!res.ok) {
+            const errMsg = await parseErrorResponse(res, 'Failed to fetch departures');
+            throw new Error(errMsg);
+        }
         const trips = await res.json();
+        if (reqId !== reqSequence.trips) return;
         state.trips = trips;
         const statTripEl = document.getElementById('statTripCount');
         if (statTripEl) statTripEl.textContent = trips.length;
@@ -373,18 +558,30 @@ async function fetchTrips() {
                     <td>${cap}</td>
                     <td>${demandDisplay}</td>
                     <td>
-                        <button class="action-btn-small" onclick="loadTripDemand(${t.tripId})">View Demand</button>
+                        <button type="button" class="action-btn-small" onclick="loadTripDemand(${t.tripId})">View Demand</button>
                     </td>
                 </tr>
             `;
         }).join('');
     } catch (err) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Error loading trips: ${err.message}</td></tr>`;
+        if (reqId !== reqSequence.trips) return;
+        const userMsg = formatErrorMessage(err, 'Error loading trips');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-center text-danger" style="padding: 1.25rem;">
+                        <p style="margin-bottom: 0.5rem;"><strong>Failed to load scheduled departures:</strong> ${userMsg}</p>
+                        <button type="button" class="action-btn-small" onclick="fetchTrips()">&#x21bb; Retry Departures</button>
+                    </td>
+                </tr>
+            `;
+        }
     }
 }
 
 // Load Segment Demand for Trip Modal/Panel
-window.loadTripDemand = async function(tripId) {
+async function loadTripDemand(tripId) {
+    const reqId = ++reqSequence.tripDemand;
     const panel = document.getElementById('tripDemandPanel');
     const details = document.getElementById('tripDemandDetails') || document.getElementById('demandDetails');
     if (!details) return;
@@ -401,11 +598,15 @@ window.loadTripDemand = async function(tripId) {
     if (tripsSection) tripsSection.classList.add('active');
 
     try {
-        const res = await fetch(`${API_BASE}/officer/trips/${tripId}/demand`, {
+        const res = await fetchWithTimeout(`${API_BASE}/officer/trips/${tripId}/demand`, {
             headers: getAuthHeaders()
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        }, 60000);
+        if (!res.ok) {
+            const errMsg = await parseErrorResponse(res, `Failed to load demand for Trip #${tripId}`);
+            throw new Error(errMsg);
+        }
         const demand = await res.json();
+        if (reqId !== reqSequence.tripDemand) return;
 
         if (!demand || demand.length === 0) {
             details.innerHTML = `<p class="text-muted">No segment demand registered for Trip #${tripId}.</p>`;
@@ -437,22 +638,35 @@ window.loadTripDemand = async function(tripId) {
             panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     } catch (err) {
-        details.innerHTML = `<span class="text-danger">Failed to load demand: ${err.message}</span>`;
+        if (reqId !== reqSequence.tripDemand) return;
+        const userMsg = formatErrorMessage(err, `Failed to load demand for Trip #${tripId}`);
+        details.innerHTML = `
+            <div class="text-danger" style="padding: 1rem 0;">
+                <p style="margin-bottom: 0.5rem;"><strong>Error:</strong> ${userMsg}</p>
+                <button type="button" class="action-btn-small" onclick="loadTripDemand(${tripId})">&#x21bb; Retry Loading Demand</button>
+            </div>
+        `;
     }
-};
+}
 
 // Demand Management Controls (Single Source of Truth)
-window.loadDemandBreakdown = async function(tripId) {
+async function loadDemandBreakdown(tripId) {
+    const reqId = ++reqSequence.demandBreakdown;
     const liveContainer = document.getElementById('demandLiveBreakdown');
     if (!liveContainer || !tripId) return;
 
     liveContainer.innerHTML = '<p class="text-muted">Loading trip demand segments...</p>';
     try {
-        const res = await fetch(`${API_BASE}/officer/trips/${tripId}/demand`, {
+        const res = await fetchWithTimeout(`${API_BASE}/officer/trips/${tripId}/demand`, {
             headers: getAuthHeaders()
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        }, 60000);
+        if (!res.ok) {
+            const errMsg = await parseErrorResponse(res, `Failed to load breakdown for Trip #${tripId}`);
+            throw new Error(errMsg);
+        }
         const segments = await res.json();
+        if (reqId !== reqSequence.demandBreakdown) return;
+
         if (!segments || segments.length === 0) {
             liveContainer.innerHTML = `<p class="text-muted">No segment demand registered for Trip #${tripId}.</p>`;
             return;
@@ -477,9 +691,16 @@ window.loadDemandBreakdown = async function(tripId) {
             `;
         }).join('');
     } catch (err) {
-        liveContainer.innerHTML = `<p class="text-danger">Failed to load breakdown: ${err.message}</p>`;
+        if (reqId !== reqSequence.demandBreakdown) return;
+        const userMsg = formatErrorMessage(err, `Failed to load breakdown for Trip #${tripId}`);
+        liveContainer.innerHTML = `
+            <div class="text-danger" style="padding: 0.75rem 0;">
+                <p style="margin-bottom: 0.5rem;"><strong>Error:</strong> ${userMsg}</p>
+                <button type="button" class="action-btn-small" onclick="loadDemandBreakdown(${tripId})">&#x21bb; Retry Breakdown</button>
+            </div>
+        `;
     }
-};
+}
 
 const demandTripSelect = document.getElementById('demandTripSelect');
 if (demandTripSelect) {
@@ -525,20 +746,21 @@ if (applyDemandAdjustmentBtn) {
             feedback.textContent = 'Saving adjustment to common demand repository...';
             feedback.className = 'feedback-msg text-info';
         }
+        applyDemandAdjustmentBtn.disabled = true;
 
         try {
-            const res = await fetch(`${API_BASE}/admin/demand/adjust`, {
+            const res = await fetchWithTimeout(`${API_BASE}/admin/demand/adjust`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     tripId: parseInt(tripId, 10),
                     demandDelta: delta
                 })
-            });
+            }, 60000);
 
             if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.message || `HTTP ${res.status}`);
+                const errMsg = await parseErrorResponse(res, 'Failed to apply adjustment');
+                throw new Error(errMsg);
             }
 
             if (feedback) {
@@ -555,9 +777,12 @@ if (applyDemandAdjustmentBtn) {
             }
         } catch (err) {
             if (feedback) {
-                feedback.textContent = `Failed to apply adjustment: ${err.message}`;
+                const userMsg = formatErrorMessage(err, 'Failed to apply adjustment');
+                feedback.textContent = `Failed to apply adjustment: ${userMsg}`;
                 feedback.className = 'feedback-msg text-danger';
             }
+        } finally {
+            applyDemandAdjustmentBtn.disabled = false;
         }
     });
 }
@@ -574,29 +799,29 @@ if (runAllocationBtn) {
 
         if (loading) loading.hidden = false;
         if (panel) panel.hidden = true;
+        runAllocationBtn.disabled = true;
 
         try {
             const dateInput = document.getElementById('tripDateFilter')?.value
                 || (state.activeSession?.startedAt ? state.activeSession.startedAt.substring(0, 10) : '');
             const sessionId = state.activeSession?.sessionId || 1;
 
-            const res = await fetch(`${API_BASE}/officer/allocations`, {
+            const res = await fetchWithTimeout(`${API_BASE}/officer/allocations`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     sessionId: sessionId,
                     serviceDate: dateInput
                 })
-            });
+            }, 90000); // 90s for optimization solve + cold start
 
             if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.message || `HTTP ${res.status}`);
+                const errMsg = await parseErrorResponse(res, 'Allocation computation failed');
+                throw new Error(errMsg);
             }
             const proposal = await res.json();
             state.lastAllocationProposal = proposal;
 
-            if (loading) loading.hidden = true;
             if (panel) panel.hidden = false;
 
             // Section 1: Demand Analysis Cards
@@ -722,8 +947,11 @@ if (runAllocationBtn) {
                 `;
             }
         } catch (err) {
+            const userMsg = formatErrorMessage(err, 'Allocation computation failed');
+            alert(`Allocation computation failed: ${userMsg}`);
+        } finally {
             if (loading) loading.hidden = true;
-            alert(`Allocation computation failed: ${err.message}`);
+            runAllocationBtn.disabled = false;
         }
     });
 }
@@ -741,19 +969,20 @@ if (approveAllocationBtn) {
             feedback.textContent = 'Persisting approved allocation to database...';
             feedback.className = 'feedback-msg text-info';
         }
+        approveAllocationBtn.disabled = true;
 
         try {
-            const res = await fetch(`${API_BASE}/officer/allocations/approve`, {
+            const res = await fetchWithTimeout(`${API_BASE}/officer/allocations/approve`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     allocationRunId: state.lastAllocationProposal.allocationRunId
                 })
-            });
+            }, 60000);
 
             if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.message || `HTTP ${res.status}`);
+                const errMsg = await parseErrorResponse(res, 'Approval failed');
+                throw new Error(errMsg);
             }
             const result = await res.json();
 
@@ -772,19 +1001,25 @@ if (approveAllocationBtn) {
             fetchBuses();
         } catch (err) {
             if (feedback) {
-                feedback.textContent = `Approval failed: ${err.message}`;
+                const userMsg = formatErrorMessage(err, 'Approval failed');
+                feedback.textContent = `Approval failed: ${userMsg}`;
                 feedback.className = 'feedback-msg text-danger';
             }
+        } finally {
+            approveAllocationBtn.disabled = false;
         }
     });
 }
 
 // Button triggers
 const refreshBusesBtn = document.getElementById('refreshBusesBtn');
-if (refreshBusesBtn) refreshBusesBtn.addEventListener('click', fetchBuses);
+if (refreshBusesBtn) refreshBusesBtn.addEventListener('click', () => fetchBuses());
 
 const refreshTripsBtn = document.getElementById('refreshTripsBtn');
-if (refreshTripsBtn) refreshTripsBtn.addEventListener('click', fetchTrips);
+if (refreshTripsBtn) refreshTripsBtn.addEventListener('click', () => fetchTrips());
+
+const tripDateFilter = document.getElementById('tripDateFilter');
+if (tripDateFilter) tripDateFilter.addEventListener('change', () => fetchTrips());
 
 // Session Configuration (SRS F4 / U2)
 function renderSessionConfig() {
@@ -793,9 +1028,14 @@ function renderSessionConfig() {
     const selectedRoutes = state.activeSession?.selectedRouteIds || [];
     const hasExplicitRouteSelection = state.activeSession && Array.isArray(state.activeSession.selectedRouteIds);
 
-    if (routesContainer && state.routes) {
-        if (state.routes.length === 0) {
-            routesContainer.innerHTML = '<p class="text-muted">No routes available.</p>';
+    if (routesContainer) {
+        if (!state.routes || state.routes.length === 0) {
+            routesContainer.innerHTML = `
+                <div style="padding: 8px 0;">
+                    <p class="text-muted" style="margin-bottom: 6px;">No routes loaded.</p>
+                    <button type="button" class="action-btn-small" onclick="fetchRoutes()">&#x21bb; Reload Routes</button>
+                </div>
+            `;
         } else {
             routesContainer.innerHTML = state.routes.map(r => {
                 const isChecked = hasExplicitRouteSelection
@@ -838,17 +1078,21 @@ if (saveSessionConfigBtn) {
         }
 
         const sessionId = state.activeSession?.sessionId || 1;
+        saveSessionConfigBtn.disabled = true;
 
         try {
-            const res = await fetch(`${API_BASE}/admin/sessions/${sessionId}/selection`, {
+            const res = await fetchWithTimeout(`${API_BASE}/admin/sessions/${sessionId}/selection`, {
                 method: 'PUT',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     routeIds: selectedRoutes
                 })
-            });
+            }, 60000);
 
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) {
+                const errMsg = await parseErrorResponse(res, 'Failed to save session configuration');
+                throw new Error(errMsg);
+            }
             if (feedback) {
                 feedback.textContent = `Session configuration saved (${selectedRoutes.length} route(s) active). Synchronizing departures...`;
                 feedback.className = 'feedback-msg text-success';
@@ -856,7 +1100,7 @@ if (saveSessionConfigBtn) {
 
             // Immediately refresh active session, trips, and buses so unselected routes (e.g. Route 2) vanish immediately!
             await fetchActiveSession();
-            await Promise.all([fetchTrips(), fetchBuses()]);
+            await Promise.allSettled([fetchTrips(), fetchBuses()]);
 
             if (feedback) {
                 feedback.textContent = `Session configuration saved (${selectedRoutes.length} route(s) active). Departures and fleet updated!`;
@@ -864,9 +1108,12 @@ if (saveSessionConfigBtn) {
             }
         } catch (err) {
             if (feedback) {
-                feedback.textContent = `Failed to save session configuration: ${err.message}`;
+                const userMsg = formatErrorMessage(err, 'Failed to save session configuration');
+                feedback.textContent = `Failed to save session configuration: ${userMsg}`;
                 feedback.className = 'feedback-msg text-danger';
             }
+        } finally {
+            saveSessionConfigBtn.disabled = false;
         }
     });
 }
@@ -874,15 +1121,33 @@ if (saveSessionConfigBtn) {
 const refreshSessionConfigBtn = document.getElementById('refreshSessionConfigBtn');
 if (refreshSessionConfigBtn) {
     refreshSessionConfigBtn.addEventListener('click', async () => {
-        await Promise.all([fetchRoutes(), fetchBuses()]);
-        renderSessionConfig();
         const feedback = document.getElementById('sessionConfigFeedback');
         if (feedback) {
-            feedback.textContent = 'Session data refreshed.';
+            feedback.textContent = 'Refreshing session data...';
             feedback.className = 'feedback-msg text-info';
+        }
+        refreshSessionConfigBtn.disabled = true;
+        try {
+            await Promise.allSettled([fetchRoutes(), fetchBuses()]);
+            renderSessionConfig();
+            if (feedback) {
+                feedback.textContent = 'Session data refreshed.';
+                feedback.className = 'feedback-msg text-info';
+            }
+        } finally {
+            refreshSessionConfigBtn.disabled = false;
         }
     });
 }
 
+// Globally expose read-only and drilldown functions for inline HTML event triggers
+window.fetchBuses = fetchBuses;
+window.fetchTrips = fetchTrips;
+window.fetchRoutes = fetchRoutes;
+window.fetchActiveSession = fetchActiveSession;
+window.loadTripDemand = loadTripDemand;
+window.loadDemandBreakdown = loadDemandBreakdown;
+
 // Initialize on page load
 checkAuth();
+
