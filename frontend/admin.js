@@ -415,18 +415,18 @@ window.loadTripDemand = async function(tripId) {
         const routeTitle = demand[0]?.routeCode || 'Route';
         details.innerHTML = `<h4>Demand Profile: Trip #${tripId} (${routeTitle})</h4>` +
             demand.map(d => {
-                const baseD = d.registeredDemand ?? d.baseDemand ?? 0;
+                const existingD = d.existingDemand ?? ((d.registeredDemand ?? 0) + (d.searchIntentDemand ?? d.searchDemand ?? 0)) ?? (d.baseDemand ?? 0);
                 const simAdj = d.simulatedAdjustment ?? 0;
-                const effD = d.effectiveDemand ?? d.adjustedDemand ?? (baseD + simAdj);
+                const effD = d.effectiveDemand ?? d.adjustedDemand ?? Math.max(0, existingD + simAdj);
                 const adjLabel = simAdj !== 0 ? (simAdj > 0 ? `+${simAdj}` : `${simAdj}`) : '0';
                 const cap = d.currentCapacity ? `${d.currentCapacity} seats` : (d.currentBus && d.currentBus !== 'UNASSIGNED' ? d.currentBus : 'None');
                 return `
                     <div class="segment-card">
                         <div class="segment-name">${d.segmentIndex || '#'}. ${d.startStopName || 'Start'} &rarr; ${d.endStopName || 'End'}</div>
                         <div class="segment-metrics">
-                            <span>Base Inquiries/Bookings: <strong>${baseD}</strong></span>
+                            <span>Bookings / Inquiries: <strong>${existingD}</strong></span>
                             <span>Admin Adjustments: <strong>${adjLabel}</strong></span>
-                            <span>Effective Demand: <strong>${effD} pax</strong></span>
+                            <span>Total Segment Demand: <strong>${effD} pax</strong></span>
                             <span>Current Bus Capacity: <strong>${cap}</strong></span>
                         </div>
                     </div>
@@ -459,16 +459,16 @@ window.loadDemandBreakdown = async function(tripId) {
         }
 
         liveContainer.innerHTML = segments.map(s => {
-            const baseD = s.registeredDemand ?? s.baseDemand ?? 0;
+            const existingD = s.existingDemand ?? ((s.registeredDemand ?? 0) + (s.searchIntentDemand ?? s.searchDemand ?? 0)) ?? (s.baseDemand ?? 0);
             const simAdj = s.simulatedAdjustment ?? 0;
-            const effD = s.effectiveDemand ?? s.adjustedDemand ?? (baseD + simAdj);
+            const effD = s.effectiveDemand ?? s.adjustedDemand ?? Math.max(0, existingD + simAdj);
             const adjLabel = simAdj !== 0 ? (simAdj > 0 ? `+${simAdj}` : `${simAdj}`) : '0';
             const cap = s.currentCapacity ? `${s.currentCapacity} seats` : (s.currentBus || 'None');
             return `
                 <div class="segment-card" style="margin-bottom: 8px;">
                     <div class="segment-title">Segment ${s.segmentIndex || '#'}: ${s.startStopName || 'Start'} &rarr; ${s.endStopName || 'End'}</div>
                     <div class="segment-stats">
-                        <span>Bookings / Inquiries: <strong>${baseD}</strong></span>
+                        <span>Bookings / Inquiries: <strong>${existingD}</strong></span>
                         <span>Admin Adjustments: <strong>${adjLabel}</strong></span>
                         <span>Total Segment Demand: <strong>${effD} pax</strong></span>
                         <span>Current Bus Capacity: <strong>${cap}</strong></span>

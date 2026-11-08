@@ -40,6 +40,7 @@ to your local DB.
 |---|------|-------------|------|
 | 001 | `001_add_rest_slots_to_buses.sql` | Added `rest_start` and `rest_end` (TIME, NULL) to `buses` for daily rest-slot windows. Backfilled sample data. | 2026-10-30 |
 | 005 | `005_multi_bus_trip_assignments.sql` | Added `allocation_assignment_buses` child table and updated `trip_assignments` active index to support multiple active buses per trip. | 2026-11-08 |
+| 006 | `006_trip_specific_demand_adjustments.sql` | Added nullable `trip_id` column and indexes to `segment_demand_adjustments` for trip-specific administrative demand management. | 2026-11-08 |
 
 ## Conventions
 

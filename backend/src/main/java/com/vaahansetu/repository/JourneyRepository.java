@@ -438,6 +438,7 @@ public class JourneyRepository {
                         FROM segment_demand_adjustments sda
                         WHERE sda.route_id = st.route_id
                           AND (sda.session_id = ?::bigint OR ?::bigint IS NULL)
+                          AND (sda.trip_id = st.trip_id OR sda.trip_id IS NULL)
                         GROUP BY sda.segment_start_stop_id
                     ) sub
                 ) a ON TRUE

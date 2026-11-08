@@ -213,6 +213,7 @@ public class OfficerRepository {
                                        WHERE (sda.session_id = ? OR ? IS NULL)
                                          AND sda.route_id = rs.route_id
                                          AND sda.segment_start_stop_id = rs.stop_id
+                                         AND (sda.trip_id = t.trip_id OR sda.trip_id IS NULL)
                                    ), 0)
                                ) AS seg_demand
                                FROM route_stops rs
@@ -242,6 +243,7 @@ public class OfficerRepository {
                                        WHERE (sda.session_id = ? OR ? IS NULL)
                                          AND sda.route_id = rs.route_id
                                          AND sda.segment_start_stop_id = rs.stop_id
+                                         AND (sda.trip_id = t.trip_id OR sda.trip_id IS NULL)
                                    ), 0)
                                ) AS seg_demand
                                FROM route_stops rs
@@ -312,6 +314,10 @@ public class OfficerRepository {
                     s_end.stop_name            AS "endStopName",
                     COALESCE(j.confirmed_demand, 0) AS "registeredDemand",
                     COALESCE(j.search_demand, 0)    AS "searchIntentDemand",
+                    (COALESCE(j.confirmed_demand, 0) + COALESCE(j.search_demand, 0)) AS "existingDemand",
+                    (COALESCE(j.confirmed_demand, 0) + COALESCE(j.search_demand, 0)) AS "baseDemand",
+                    COALESCE(j.confirmed_demand, 0) AS "bookedDemand",
+                    COALESCE(j.search_demand, 0)    AS "inquiryDemand",
                     COALESCE(a.adj_demand, 0)       AS "simulatedAdjustment",
                     GREATEST(0, COALESCE(j.confirmed_demand, 0) + COALESCE(j.search_demand, 0) + COALESCE(a.adj_demand, 0)) AS "effectiveDemand",
                     COALESCE(b.registration_number, 'UNASSIGNED') AS "currentBus",
@@ -357,6 +363,7 @@ public class OfficerRepository {
                       AND sda.route_id = rs.route_id
                       AND sda.segment_start_stop_id = rs.stop_id
                       AND sda.segment_end_stop_id = rs2.stop_id
+                      AND (sda.trip_id = t.trip_id OR sda.trip_id IS NULL)
                 ) a ON TRUE
                 WHERE rs.route_id = (SELECT route_id FROM scheduled_trips WHERE trip_id = ?)
                 ORDER BY rs.stop_sequence
@@ -840,15 +847,15 @@ public class OfficerRepository {
      * Insert segment demand adjustments for simulation.
      * Returns the new total elapsed simulation minutes for this session.
      */
-    public int simulateStep(long sessionId, long routeId,
+    public int simulateStep(long sessionId, long routeId, Long tripId,
                              List<Long> startStopIds, List<Long> endStopIds,
                              List<Integer> deltas) {
         for (int i = 0; i < startStopIds.size(); i++) {
             jdbcTemplate.update(
                     "INSERT INTO segment_demand_adjustments " +
-                    "(session_id, route_id, segment_start_stop_id, segment_end_stop_id, demand_delta, is_simulated) " +
-                    "VALUES (?, ?, ?, ?, ?, TRUE)",
-                    sessionId, routeId, startStopIds.get(i), endStopIds.get(i), deltas.get(i));
+                    "(session_id, route_id, trip_id, segment_start_stop_id, segment_end_stop_id, demand_delta, is_simulated) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, TRUE)",
+                    sessionId, routeId, tripId, startStopIds.get(i), endStopIds.get(i), deltas.get(i));
         }
         // Advance simulation clock by 2 minutes
         jdbcTemplate.update(
@@ -862,6 +869,12 @@ public class OfficerRepository {
         return elapsed == null ? 0 : elapsed;
     }
 
+    public int simulateStep(long sessionId, long routeId,
+                             List<Long> startStopIds, List<Long> endStopIds,
+                             List<Integer> deltas) {
+        return simulateStep(sessionId, routeId, null, startStopIds, endStopIds, deltas);
+    }
+
     public int advanceSessionClock(long sessionId, int minutes) {
         jdbcTemplate.update(
                 "UPDATE planning_sessions SET simulation_elapsed_minutes = simulation_elapsed_minutes + ? " +
@@ -873,14 +886,19 @@ public class OfficerRepository {
         return elapsed == null ? 0 : elapsed;
     }
 
-    public void saveDemandAdjustment(long sessionId, long routeId, List<Long> startStopIds, List<Long> endStopIds, int delta) {
+    public void saveDemandAdjustment(long sessionId, long routeId, Long tripId,
+                                     List<Long> startStopIds, List<Long> endStopIds, int delta) {
         for (int i = 0; i < startStopIds.size(); i++) {
             jdbcTemplate.update(
                     "INSERT INTO segment_demand_adjustments " +
-                    "(session_id, route_id, segment_start_stop_id, segment_end_stop_id, demand_delta, is_simulated) " +
-                    "VALUES (?, ?, ?, ?, ?, FALSE)",
-                    sessionId, routeId, startStopIds.get(i), endStopIds.get(i), delta);
+                    "(session_id, route_id, trip_id, segment_start_stop_id, segment_end_stop_id, demand_delta, is_simulated) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, FALSE)",
+                    sessionId, routeId, tripId, startStopIds.get(i), endStopIds.get(i), delta);
         }
+    }
+
+    public void saveDemandAdjustment(long sessionId, long routeId, List<Long> startStopIds, List<Long> endStopIds, int delta) {
+        saveDemandAdjustment(sessionId, routeId, null, startStopIds, endStopIds, delta);
     }
 
     // ----------------------------------------------------------------
@@ -1221,12 +1239,13 @@ public class OfficerRepository {
         String sql = """
                 SELECT session_id              AS "sessionId",
                        route_id                AS "routeId",
+                       trip_id                 AS "tripId",
                        segment_start_stop_id   AS "startStopId",
                        segment_end_stop_id     AS "endStopId",
                        SUM(demand_delta)       AS "totalDelta"
                 FROM segment_demand_adjustments
                 WHERE session_id = ?
-                GROUP BY session_id, route_id, segment_start_stop_id, segment_end_stop_id
+                GROUP BY session_id, route_id, trip_id, segment_start_stop_id, segment_end_stop_id
                 """;
         return jdbcTemplate.queryForList(sql, sessionId);
     }

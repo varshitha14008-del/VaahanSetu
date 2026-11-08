@@ -158,11 +158,15 @@ public class OfficerService {
             int registered = toInt(row.get("registeredDemand"));
             int search = toInt(row.get("searchIntentDemand"));
             int simulated = toInt(row.get("simulatedAdjustment"));
-            int effective = Math.max(0, registered + search + simulated);
+            int existing = registered + search;
+            int effective = Math.max(0, existing + simulated);
 
             Map<String, Object> enriched = new LinkedHashMap<>(row);
             enriched.put("effectiveDemand", effective);
-            enriched.put("baseDemand", registered);
+            enriched.put("existingDemand", existing);
+            enriched.put("baseDemand", existing);
+            enriched.put("bookedDemand", registered);
+            enriched.put("inquiryDemand", search);
             enriched.put("searchDemand", search);
             enriched.put("adjustedDemand", effective);
             result.add(enriched);
@@ -409,7 +413,7 @@ public class OfficerService {
             endStops.add(toLong(seg.get("endStopId")));
         }
 
-        repo.saveDemandAdjustment(sessionId, routeId, startStops, endStops, demandDelta);
+        repo.saveDemandAdjustment(sessionId, routeId, tripId, startStops, endStops, demandDelta);
 
         return Map.of(
                 "status", "SUCCESS",
@@ -462,7 +466,7 @@ public class OfficerService {
             affected.add(Map.of("tripId", tripId, "routeId", routeId, "startStopId", startId, "endStopId", endId, "delta", delta));
         }
 
-        int elapsed = repo.simulateStep(sessionId, routeId, startStops, endStops, deltas);
+        int elapsed = repo.simulateStep(sessionId, routeId, tripId, startStops, endStops, deltas);
         return Map.of(
                 "elapsedMinutes", elapsed,
                 "message", "Simulation clock advanced to T+" + String.format("%02d:%02d", elapsed / 60, elapsed % 60) + " (" + segments.size() + " segment adjustments persisted)",
@@ -474,7 +478,7 @@ public class OfficerService {
     // Engine input builder
     // ----------------------------------------------------------------
 
-    private com.vaahansetu.allocation.AllocationModels.Input buildEngineInput(
+    public com.vaahansetu.allocation.AllocationModels.Input buildEngineInput(
             long sessionId, LocalDate serviceDate, LocalDateTime allocationTime) {
 
         // Routes
@@ -545,14 +549,17 @@ public class OfficerService {
         List<Map<String, Object>> adjustments = repo.findSimulationAdjustments(sessionId);
         for (Map<String, Object> adj : adjustments) {
             long routeId = toLong(adj.get("routeId"));
+            Long tripId = adj.get("tripId") != null ? toLong(adj.get("tripId")) : null;
             long startStopId = toLong(adj.get("startStopId"));
             long endStopId = toLong(adj.get("endStopId"));
             int delta = toInt(adj.get("totalDelta"));
             if (delta != 0) {
                 for (com.vaahansetu.allocation.AllocationModels.Trip t : trips) {
                     if (t.routeId() == routeId) {
-                        journeys.add(new com.vaahansetu.allocation.AllocationModels.Journey(
-                                t.id(), startStopId, endStopId, delta));
+                        if (tripId == null || tripId.equals(t.id())) {
+                            journeys.add(new com.vaahansetu.allocation.AllocationModels.Journey(
+                                    t.id(), startStopId, endStopId, delta));
+                        }
                     }
                 }
             }
