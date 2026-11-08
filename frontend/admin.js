@@ -765,12 +765,9 @@ if (refreshTripsBtn) refreshTripsBtn.addEventListener('click', fetchTrips);
 // Session Configuration (SRS F4 / U2)
 function renderSessionConfig() {
     const routesContainer = document.getElementById('sessionRoutesList');
-    const busesContainer = document.getElementById('sessionBusesList');
 
     const selectedRoutes = state.activeSession?.selectedRouteIds || [];
-    const selectedBuses = state.activeSession?.selectedBusIds || [];
     const hasExplicitRouteSelection = state.activeSession && Array.isArray(state.activeSession.selectedRouteIds);
-    const hasExplicitBusSelection = state.activeSession && Array.isArray(state.activeSession.selectedBusIds);
 
     if (routesContainer && state.routes) {
         if (state.routes.length === 0) {
@@ -794,27 +791,6 @@ function renderSessionConfig() {
             }).join('');
         }
     }
-
-    if (busesContainer && state.buses) {
-        if (state.buses.length === 0) {
-            busesContainer.innerHTML = '<p class="text-muted">No buses available.</p>';
-        } else {
-            busesContainer.innerHTML = state.buses.map(b => {
-                const isChecked = hasExplicitBusSelection
-                    ? selectedBuses.includes(b.busId)
-                    : true;
-                const bReg = b.registrationNumber || ('Bus #' + b.busId);
-                return `
-                <div class="checkbox-item" style="padding: 6px 0;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" class="session-bus-check" value="${b.busId}" ${isChecked ? 'checked' : ''}>
-                        <span><strong>${bReg}</strong> (${b.capacity} seats, ${b.status || 'ACTIVE'})</span>
-                    </label>
-                </div>
-            `;
-            }).join('');
-        }
-    }
 }
 
 const saveSessionConfigBtn = document.getElementById('saveSessionConfigBtn');
@@ -828,12 +804,10 @@ if (saveSessionConfigBtn) {
 
         const selectedRoutes = Array.from(document.querySelectorAll('.session-route-check:checked'))
             .map(cb => parseInt(cb.value, 10));
-        const selectedBuses = Array.from(document.querySelectorAll('.session-bus-check:checked'))
-            .map(cb => parseInt(cb.value, 10));
 
-        if (selectedBuses.length === 0) {
+        if (selectedRoutes.length === 0) {
             if (feedback) {
-                feedback.textContent = 'Please select at least one bus for the session.';
+                feedback.textContent = 'Please select at least one route for the session.';
                 feedback.className = 'feedback-msg text-danger';
             }
             return;
@@ -846,14 +820,13 @@ if (saveSessionConfigBtn) {
                 method: 'PUT',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
-                    routeIds: selectedRoutes,
-                    busIds: selectedBuses
+                    routeIds: selectedRoutes
                 })
             });
 
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             if (feedback) {
-                feedback.textContent = `Session configuration saved (${selectedRoutes.length} routes, ${selectedBuses.length} buses active). Synchronizing departures...`;
+                feedback.textContent = `Session configuration saved (${selectedRoutes.length} route(s) active). Synchronizing departures...`;
                 feedback.className = 'feedback-msg text-success';
             }
 
@@ -862,7 +835,7 @@ if (saveSessionConfigBtn) {
             await Promise.all([fetchTrips(), fetchBuses()]);
 
             if (feedback) {
-                feedback.textContent = `Session configuration saved (${selectedRoutes.length} routes, ${selectedBuses.length} buses active). Departures and fleet updated!`;
+                feedback.textContent = `Session configuration saved (${selectedRoutes.length} route(s) active). Departures and fleet updated!`;
                 feedback.className = 'feedback-msg text-success';
             }
         } catch (err) {

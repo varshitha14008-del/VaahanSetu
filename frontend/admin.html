@@ -106,19 +106,13 @@
                         <button class="refresh-btn" id="refreshSessionConfigBtn">&#x21bb; Reload Current Session</button>
                     </div>
                     <p class="form-description">
-                        Select active routes and buses allocated for the operational planning session (persisted to session_routes and session_buses).
+                        Select active routes for the operational planning session. Eligible fleet buses are automatically determined based on availability and rest requirements.
                     </p>
                     <div class="sim-controls-grid">
-                        <div class="sim-box">
+                        <div class="sim-box" style="grid-column: 1 / -1;">
                             <h4>Active Routes for Session</h4>
                             <div id="sessionRoutesList" class="selection-list">
                                 <p class="text-muted">Loading routes...</p>
-                            </div>
-                        </div>
-                        <div class="sim-box">
-                            <h4>Active Fleet Buses for Session</h4>
-                            <div id="sessionBusesList" class="selection-list">
-                                <p class="text-muted">Loading fleet...</p>
                             </div>
                         </div>
                     </div>

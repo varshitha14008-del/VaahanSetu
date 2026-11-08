@@ -358,19 +358,14 @@ public class OfficerRepository {
     // ----------------------------------------------------------------
 
     public void saveSessionSelection(long sessionId, List<Long> routeIds, List<Long> busIds) {
-        // Clear existing selections
+        // Clear and update route selections; preserve session_buses records without using them as eligibility restrictions
         jdbcTemplate.update("DELETE FROM session_routes WHERE session_id = ?", sessionId);
-        jdbcTemplate.update("DELETE FROM session_buses  WHERE session_id = ?", sessionId);
-        // Insert new selections
-        for (Long routeId : routeIds) {
-            jdbcTemplate.update(
-                    "INSERT INTO session_routes (session_id, route_id) VALUES (?,?) ON CONFLICT DO NOTHING",
-                    sessionId, routeId);
-        }
-        for (Long busId : busIds) {
-            jdbcTemplate.update(
-                    "INSERT INTO session_buses (session_id, bus_id) VALUES (?,?) ON CONFLICT DO NOTHING",
-                    sessionId, busId);
+        if (routeIds != null) {
+            for (Long routeId : routeIds) {
+                jdbcTemplate.update(
+                        "INSERT INTO session_routes (session_id, route_id) VALUES (?,?) ON CONFLICT DO NOTHING",
+                        sessionId, routeId);
+            }
         }
     }
 
@@ -752,15 +747,11 @@ public class OfficerRepository {
                        b.rest_duration_minutes AS "restDurationMinutes",
                        b.rest_start            AS "restStart",
                        b.rest_end              AS "restEnd",
-                       (
-                           NOT EXISTS (SELECT 1 FROM session_buses sb_check WHERE sb_check.session_id = ?)
-                           OR sb.bus_id IS NOT NULL
-                       ) AS "selectedForSession"
+                       TRUE                    AS "selectedForSession"
                 FROM buses b
-                LEFT JOIN session_buses sb ON sb.bus_id = b.bus_id AND sb.session_id = ?
                 ORDER BY b.bus_id
                 """;
-        return jdbcTemplate.queryForList(sql, sessionId, sessionId);
+        return jdbcTemplate.queryForList(sql);
     }
 
     public List<Map<String, Object>> findEngineTrips(long sessionId, LocalDate serviceDate,

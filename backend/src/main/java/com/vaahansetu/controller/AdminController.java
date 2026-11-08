@@ -48,15 +48,15 @@ public class AdminController {
         @SuppressWarnings("unchecked")
         List<?> rawBuses = (List<?>) body.get("busIds");
 
-        if (rawRoutes == null || rawBuses == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "routeIds and busIds are required."));
+        if (rawRoutes == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "routeIds is required."));
         }
 
         List<Long> routeIds = rawRoutes.stream()
                 .filter(v -> v != null)
                 .map(v -> Long.parseLong(v.toString().trim()))
                 .toList();
-        List<Long> busIds = rawBuses.stream()
+        List<Long> busIds = rawBuses == null ? List.of() : rawBuses.stream()
                 .filter(v -> v != null)
                 .map(v -> Long.parseLong(v.toString().trim()))
                 .toList();
