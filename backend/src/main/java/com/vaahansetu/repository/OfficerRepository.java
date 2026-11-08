@@ -2,11 +2,14 @@ package com.vaahansetu.repository;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.vaahansetu.allocation.AllocationEngine;
 
 /**
  * Database queries supporting the officer console REST endpoints.
@@ -321,8 +324,16 @@ public class OfficerRepository {
                    AND rs2.stop_sequence = rs.stop_sequence + 1
                 JOIN stops s_end ON s_end.stop_id = rs2.stop_id
                 JOIN scheduled_trips t ON t.route_id = rs.route_id AND t.trip_id = ?
-                LEFT JOIN trip_assignments ta ON ta.trip_id = t.trip_id AND ta.status = 'ACTIVE'
-                LEFT JOIN buses b ON b.bus_id = ta.bus_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        STRING_AGG(b2.registration_number, ', ' ORDER BY b2.bus_id) AS registration_number,
+                        COALESCE(SUM(b2.capacity), 0) AS capacity
+                    FROM trip_assignments ta2
+                    JOIN buses b2 ON b2.bus_id = ta2.bus_id
+                    WHERE ta2.trip_id = t.trip_id
+                      AND ta2.status = 'ACTIVE'
+                      AND b2.status = 'ACTIVE'
+                ) b ON TRUE
                 LEFT JOIN LATERAL (
                     SELECT
                         COALESCE(SUM(CASE WHEN pj.journey_status IN ('REGISTERED','BOARDED','COMPLETED') THEN pj.passenger_count ELSE 0 END), 0) AS confirmed_demand,
@@ -416,6 +427,26 @@ public class OfficerRepository {
                        aa.trip_id                  AS "tripId",
                        r.route_code                AS "routeCode",
                        t.departure_time            AS "departureTime",
+                       t.expected_arrival_time     AS "arrivalTime",
+                       COALESCE((
+                           SELECT MAX(sub.seg_demand)
+                           FROM (
+                               SELECT COALESCE((
+                                   SELECT SUM(pj.passenger_count)
+                                   FROM passenger_journeys pj
+                                   WHERE pj.trip_id = t.trip_id
+                                     AND pj.journey_status IN ('REGISTERED', 'BOARDED', 'COMPLETED', 'UNCONFIRMED')
+                                     AND pj.boarding_stop_id IN (
+                                         SELECT rs3.stop_id FROM route_stops rs3 WHERE rs3.route_id = rs.route_id AND rs3.stop_sequence <= rs.stop_sequence
+                                     )
+                                     AND pj.destination_stop_id IN (
+                                         SELECT rs4.stop_id FROM route_stops rs4 WHERE rs4.route_id = rs.route_id AND rs4.stop_sequence >= rs.stop_sequence + 1
+                                     )
+                               ), 0) AS seg_demand
+                               FROM route_stops rs
+                               WHERE rs.route_id = t.route_id
+                           ) sub
+                       ), 0) AS "peakDemand",
                        aa.previous_bus_id          AS "previousBusId",
                        b_prev.registration_number  AS "previousBusRegistration",
                        b_prev.capacity             AS "previousCapacity",
@@ -432,7 +463,72 @@ public class OfficerRepository {
                 WHERE aa.allocation_run_id = ?
                 ORDER BY t.departure_time, aa.trip_id
                 """;
-        return jdbcTemplate.queryForList(sql, runId);
+        List<Map<String, Object>> assignments = jdbcTemplate.queryForList(sql, runId);
+
+        // Fetch detail rows from child table allocation_assignment_buses
+        Map<Long, List<Map<String, Object>>> busesByAssignment = new LinkedHashMap<>();
+        try {
+            String childSql = """
+                    SELECT aab.allocation_assignment_id AS "assignmentId",
+                           b.bus_id                    AS "busId",
+                           b.registration_number       AS "registrationNumber",
+                           COALESCE(b.capacity, 0)     AS "capacity"
+                    FROM allocation_assignment_buses aab
+                    JOIN allocation_assignments aa ON aa.allocation_assignment_id = aab.allocation_assignment_id
+                    JOIN buses b ON b.bus_id = aab.bus_id
+                    WHERE aa.allocation_run_id = ?
+                    ORDER BY b.bus_id
+                    """;
+            List<Map<String, Object>> childRows = jdbcTemplate.queryForList(childSql, runId);
+            for (Map<String, Object> cr : childRows) {
+                long aId = ((Number) cr.get("assignmentId")).longValue();
+                busesByAssignment.computeIfAbsent(aId, k -> new ArrayList<>()).add(cr);
+            }
+        } catch (Exception ignored) {
+            // Child table may not exist yet in legacy environment
+        }
+
+        for (Map<String, Object> a : assignments) {
+            long aId = ((Number) a.get("allocationAssignmentId")).longValue();
+            List<Map<String, Object>> childBuses = busesByAssignment.get(aId);
+
+            if (childBuses != null && !childBuses.isEmpty()) {
+                List<Long> busIds = new ArrayList<>();
+                List<String> regNos = new ArrayList<>();
+                int totalCap = 0;
+                for (Map<String, Object> cb : childBuses) {
+                    busIds.add(((Number) cb.get("busId")).longValue());
+                    regNos.add((String) cb.get("registrationNumber"));
+                    totalCap += ((Number) cb.get("capacity")).intValue();
+                }
+                a.put("proposedBusIds", busIds);
+                a.put("proposedBusRegistration", String.join(", ", regNos));
+                a.put("proposedCapacity", totalCap);
+                a.put("proposedBuses", childBuses);
+            } else {
+                // Historical / single-bus fallback
+                Object pIdObj = a.get("proposedBusId");
+                if (pIdObj != null) {
+                    long pId = ((Number) pIdObj).longValue();
+                    a.put("proposedBusIds", List.of(pId));
+                    a.put("proposedBuses", List.of(Map.of(
+                            "busId", pId,
+                            "registrationNumber", a.getOrDefault("proposedBusRegistration", "Bus #" + pId),
+                            "capacity", a.getOrDefault("proposedCapacity", 0)
+                    )));
+                } else {
+                    a.put("proposedBusIds", List.of());
+                    a.put("proposedBuses", List.of());
+                }
+            }
+
+            int propCap = a.get("proposedCapacity") != null ? ((Number) a.get("proposedCapacity")).intValue() : 0;
+            int peakD = a.get("peakDemand") != null ? ((Number) a.get("peakDemand")).intValue() : 0;
+            int occ = propCap > 0 ? (int) Math.round((peakD * 100.0) / propCap) : 0;
+            a.put("occupancy", occ);
+        }
+
+        return assignments;
     }
 
     public List<Map<String, Object>> findSegmentResults(long runId) {
@@ -461,47 +557,272 @@ public class OfficerRepository {
     // ----------------------------------------------------------------
 
     /**
-     * Approves an allocation run.
+     * Approves an allocation run safely and atomically.
      * <ol>
-     *   <li>Marks the run as APPROVED.
-     *   <li>For each REASSIGNED assignment: marks current trip_assignment
-     *       as REPLACED and inserts a new ACTIVE assignment.
+     *   <li>Locks the allocation run row (FOR UPDATE) and checks its status. If already APPROVED, returns idempotently.
+     *   <li>Retrieves all REASSIGNED assignments for this run along with their scheduled trip details.
+     *   <li>Loads all proposed bus IDs (from allocation_assignment_buses, with primary_bus_id fallback).
+     *   <li>Locks all proposed buses in deterministic order (ORDER BY bus_id FOR UPDATE) to serialize concurrent approvals.
+     *   <li>Validates bus existence and ACTIVE status.
+     *   <li>Validates that no proposed assignment overlaps the bus's fixed daily rest window.
+     *   <li>Validates that no bus is assigned to multiple overlapping trips within this proposal (turnaround buffer).
+     *   <li>Validates that no bus conflicts with existing active assignments (including unselected routes).
+     *   <li>If any validation fails, throws IllegalStateException, which triggers transaction rollback.
+     *   <li>Replaces existing active assignments and inserts new active assignments for every proposed bus.
+     *   <li>Marks the allocation run as APPROVED.
      * </ol>
-     * This is performed as a series of JDBC updates; the caller is
-     * responsible for wrapping them in a transaction (@Transactional).
      */
     public void approveAllocationRun(long runId, Long approvedByUserId) {
-        // Mark the run as APPROVED
-        jdbcTemplate.update(
-                "UPDATE allocation_runs SET status = 'APPROVED'::allocation_status, created_by = COALESCE(created_by, ?) " +
-                "WHERE allocation_run_id = ? AND status = 'PROPOSED'::allocation_status",
-                approvedByUserId, runId);
+        // 1. Lock and inspect allocation run status
+        List<Map<String, Object>> runRows = jdbcTemplate.queryForList(
+                "SELECT status FROM allocation_runs WHERE allocation_run_id = ? FOR UPDATE",
+                runId);
+        if (!runRows.isEmpty()) {
+            String currentStatus = String.valueOf(runRows.get(0).get("status"));
+            if ("APPROVED".equalsIgnoreCase(currentStatus)) {
+                // Idempotent duplicate approval: do nothing and return safely
+                return;
+            }
+            if (!"PROPOSED".equalsIgnoreCase(currentStatus)) {
+                throw new IllegalStateException("Allocation run " + runId + " is in status " + currentStatus + " and cannot be approved.");
+            }
+        }
 
-        // Load REASSIGNED assignments from this run
+        // 2. Load REASSIGNED assignments from this run with trip details
         String sql = """
-                SELECT aa.trip_id, aa.proposed_bus_id
+                SELECT aa.allocation_assignment_id AS "assignmentId",
+                       aa.trip_id                  AS "tripId",
+                       aa.proposed_bus_id          AS "primaryBusId",
+                       t.route_id                  AS "routeId",
+                       r.route_code                AS "routeCode",
+                       t.departure_time            AS "departureTime",
+                       t.expected_arrival_time     AS "expectedArrivalTime"
                 FROM allocation_assignments aa
+                LEFT JOIN scheduled_trips t ON t.trip_id = aa.trip_id
+                LEFT JOIN routes r ON r.route_id = t.route_id
                 WHERE aa.allocation_run_id = ?
                   AND aa.assignment_type = 'REASSIGNED'::allocation_assignment_type
-                  AND aa.proposed_bus_id IS NOT NULL
+                ORDER BY aa.trip_id
                 """;
         List<Map<String, Object>> reassigned = jdbcTemplate.queryForList(sql, runId);
 
-        for (Map<String, Object> row : reassigned) {
-            long tripId = ((Number) row.get("trip_id")).longValue();
-            long proposedBusId = ((Number) row.get("proposed_bus_id")).longValue();
+        record ProposedTripAssignment(
+                long assignmentId,
+                long tripId,
+                Long routeId,
+                String routeCode,
+                LocalDateTime departureTime,
+                LocalDateTime expectedArrivalTime,
+                List<Long> busIds
+        ) {}
 
+        List<ProposedTripAssignment> proposedAssignments = new ArrayList<>();
+        Set<Long> allProposedBusIds = new TreeSet<>();
+
+        for (Map<String, Object> row : reassigned) {
+            long assignmentId = toLong(row.get("assignmentId"));
+            long tripId = toLong(row.get("tripId"));
+            Long routeId = toLong(row.get("routeId"));
+            String routeCode = row.get("routeCode") != null ? String.valueOf(row.get("routeCode")) : "ROUTE";
+            LocalDateTime departureTime = toLocalDateTime(row.get("departureTime"));
+            LocalDateTime expectedArrivalTime = toLocalDateTime(row.get("expectedArrivalTime"));
+
+            List<Long> busIds = new ArrayList<>();
+            try {
+                busIds = jdbcTemplate.queryForList(
+                        "SELECT bus_id FROM allocation_assignment_buses WHERE allocation_assignment_id = ? ORDER BY bus_id",
+                        Long.class, assignmentId);
+            } catch (Exception ignored) {
+            }
+
+            if (busIds.isEmpty() && row.get("primaryBusId") != null) {
+                busIds = List.of(toLong(row.get("primaryBusId")));
+            }
+
+            if (!busIds.isEmpty()) {
+                proposedAssignments.add(new ProposedTripAssignment(
+                        assignmentId, tripId, routeId, routeCode, departureTime, expectedArrivalTime, busIds));
+                allProposedBusIds.addAll(busIds);
+            }
+        }
+
+        if (allProposedBusIds.isEmpty()) {
+            // No proposed bus reassignments to validate or insert
+            jdbcTemplate.update(
+                    "UPDATE allocation_runs SET status = 'APPROVED'::allocation_status, created_by = COALESCE(created_by, ?) " +
+                    "WHERE allocation_run_id = ?",
+                    approvedByUserId, runId);
+            return;
+        }
+
+        // 3. Lock all proposed buses in deterministic order to prevent race conditions and deadlocks
+        List<Long> sortedBusIds = new ArrayList<>(allProposedBusIds);
+        Collections.sort(sortedBusIds);
+        String inPlaceholders = String.join(",", Collections.nCopies(sortedBusIds.size(), "?"));
+
+        String busSql = "SELECT bus_id AS \"busId\", registration_number AS \"registrationNumber\", " +
+                "capacity AS \"capacity\", status AS \"status\", " +
+                "rest_duration_minutes AS \"restDurationMinutes\", " +
+                "rest_start_time AS \"restStartTime\", rest_end_time AS \"restEndTime\" " +
+                "FROM buses WHERE bus_id IN (" + inPlaceholders + ") ORDER BY bus_id FOR UPDATE";
+        List<Map<String, Object>> busRows = jdbcTemplate.queryForList(busSql, sortedBusIds.toArray());
+
+        Map<Long, Map<String, Object>> busMap = new HashMap<>();
+        for (Map<String, Object> br : busRows) {
+            busMap.put(toLong(br.get("busId")), br);
+        }
+
+        // 4. Validate bus existence and ACTIVE status
+        for (Long busId : sortedBusIds) {
+            Map<String, Object> busData = busMap.get(busId);
+            if (busData == null) {
+                throw new IllegalStateException("Proposed bus ID " + busId + " does not exist in the database.");
+            }
+            String status = busData.get("status") != null ? String.valueOf(busData.get("status")) : "UNKNOWN";
+            String regNo = busData.get("registrationNumber") != null ? String.valueOf(busData.get("registrationNumber")) : ("ID:" + busId);
+            if (!"ACTIVE".equalsIgnoreCase(status)) {
+                throw new IllegalStateException(String.format(
+                        "Bus %s (ID: %d) cannot be approved because its current status is %s (must be ACTIVE).",
+                        regNo, busId, status));
+            }
+
+            int restMinutes = busData.get("restDurationMinutes") != null
+                    ? ((Number) busData.get("restDurationMinutes")).intValue() : 30;
+            LocalTime restStart = toLocalTime(busData.get("restStartTime"));
+            LocalTime restEnd = toLocalTime(busData.get("restEndTime"));
+
+            // 5. Validate fixed daily rest window
+            for (ProposedTripAssignment pta : proposedAssignments) {
+                if (pta.busIds().contains(busId) && pta.departureTime() != null && pta.expectedArrivalTime() != null) {
+                    if (AllocationEngine.overlapsFixedRestWindow(restStart, restEnd, pta.departureTime(), pta.expectedArrivalTime())) {
+                        throw new IllegalStateException(String.format(
+                                "Bus %s (ID: %d) conflicts with its fixed daily rest window (%s - %s) for proposed trip %d (%s to %s).",
+                                regNo, busId, restStart, restEnd, pta.tripId(), pta.departureTime(), pta.expectedArrivalTime()));
+                    }
+                }
+            }
+
+            // 6. Validate internal proposal conflicts (same bus assigned to multiple overlapping trips in this proposal)
+            List<ProposedTripAssignment> busTrips = proposedAssignments.stream()
+                    .filter(pta -> pta.busIds().contains(busId))
+                    .filter(pta -> pta.departureTime() != null && pta.expectedArrivalTime() != null)
+                    .sorted(Comparator.comparing(ProposedTripAssignment::departureTime))
+                    .toList();
+            for (int i = 0; i < busTrips.size() - 1; i++) {
+                ProposedTripAssignment t1 = busTrips.get(i);
+                ProposedTripAssignment t2 = busTrips.get(i + 1);
+                if (AllocationEngine.isTurnaroundConflict(t1.departureTime(), t1.expectedArrivalTime(),
+                        t2.departureTime(), t2.expectedArrivalTime(), restMinutes)) {
+                    throw new IllegalStateException(String.format(
+                            "Bus %s (ID: %d) is assigned to multiple overlapping trips in this proposal: Trip %d (%s to %s) and Trip %d (%s to %s) with %d-minute turnaround buffer.",
+                            regNo, busId, t1.tripId(), t1.departureTime(), t1.expectedArrivalTime(),
+                            t2.tripId(), t2.departureTime(), t2.expectedArrivalTime(), restMinutes));
+                }
+            }
+        }
+
+        // 7. Validate external active commitments (protecting commitments on unselected routes and other trips)
+        Set<Long> proposedTripIds = new HashSet<>();
+        for (ProposedTripAssignment pta : proposedAssignments) {
+            proposedTripIds.add(pta.tripId());
+        }
+
+        String commitmentsSql = "SELECT ta.bus_id               AS \"busId\", " +
+                "       ta.trip_id              AS \"tripId\", " +
+                "       t.route_id              AS \"routeId\", " +
+                "       r.route_code            AS \"routeCode\", " +
+                "       t.departure_time        AS \"departureTime\", " +
+                "       t.expected_arrival_time AS \"expectedArrivalTime\" " +
+                "FROM trip_assignments ta " +
+                "JOIN scheduled_trips t ON t.trip_id = ta.trip_id " +
+                "JOIN routes r ON r.route_id = t.route_id " +
+                "WHERE ta.status = 'ACTIVE' " +
+                "  AND t.status <> 'CANCELLED' " +
+                "  AND ta.bus_id IN (" + inPlaceholders + ")";
+        List<Map<String, Object>> activeCommitments = jdbcTemplate.queryForList(commitmentsSql, sortedBusIds.toArray());
+
+        for (Map<String, Object> comm : activeCommitments) {
+            long commTripId = toLong(comm.get("tripId"));
+            // Existing assignments on trips in this proposal will be replaced upon approval, so ignore them
+            if (proposedTripIds.contains(commTripId)) {
+                continue;
+            }
+
+            long commBusId = toLong(comm.get("busId"));
+            Map<String, Object> busData = busMap.get(commBusId);
+            String regNo = busData != null && busData.get("registrationNumber") != null
+                    ? String.valueOf(busData.get("registrationNumber")) : ("ID:" + commBusId);
+            int restMinutes = busData != null && busData.get("restDurationMinutes") != null
+                    ? ((Number) busData.get("restDurationMinutes")).intValue() : 30;
+
+            LocalDateTime commDep = toLocalDateTime(comm.get("departureTime"));
+            LocalDateTime commArr = toLocalDateTime(comm.get("expectedArrivalTime"));
+            String commRoute = comm.get("routeCode") != null ? String.valueOf(comm.get("routeCode")) : "OTHER";
+
+            for (ProposedTripAssignment pta : proposedAssignments) {
+                if (pta.busIds().contains(commBusId) && pta.departureTime() != null && pta.expectedArrivalTime() != null
+                        && commDep != null && commArr != null) {
+                    if (AllocationEngine.isTurnaroundConflict(pta.departureTime(), pta.expectedArrivalTime(),
+                            commDep, commArr, restMinutes)) {
+                        throw new IllegalStateException(String.format(
+                                "Bus %s (ID: %d) conflicts with existing active assignment on route %s (Trip %d, %s to %s) for proposed Trip %d (%s to %s) respecting %d-minute turnaround rest buffer.",
+                                regNo, commBusId, commRoute, commTripId, commDep, commArr,
+                                pta.tripId(), pta.departureTime(), pta.expectedArrivalTime(), restMinutes));
+                    }
+                }
+            }
+        }
+
+        // 8. All validations passed! Execute the updates atomically
+        for (ProposedTripAssignment pta : proposedAssignments) {
             // Mark existing ACTIVE assignment(s) as REPLACED
             jdbcTemplate.update(
                     "UPDATE trip_assignments SET status = 'REPLACED'::assignment_status " +
                     "WHERE trip_id = ? AND status = 'ACTIVE'::assignment_status",
-                    tripId);
+                    pta.tripId());
 
-            // Insert new ACTIVE assignment
-            jdbcTemplate.update(
-                    "INSERT INTO trip_assignments (trip_id, bus_id, assigned_at, assigned_by, status) " +
-                    "VALUES (?, ?, NOW(), ?, 'ACTIVE'::assignment_status)",
-                    tripId, proposedBusId, approvedByUserId);
+            // Insert new ACTIVE assignment for EVERY proposed bus
+            for (Long busId : pta.busIds()) {
+                jdbcTemplate.update(
+                        "INSERT INTO trip_assignments (trip_id, bus_id, assigned_at, assigned_by, status) " +
+                        "VALUES (?, ?, NOW(), ?, 'ACTIVE'::assignment_status) " +
+                        "ON CONFLICT (trip_id, bus_id) WHERE status = 'ACTIVE' DO NOTHING",
+                        pta.tripId(), busId, approvedByUserId);
+            }
+        }
+
+        // Mark the run as APPROVED
+        jdbcTemplate.update(
+                "UPDATE allocation_runs SET status = 'APPROVED'::allocation_status, created_by = COALESCE(created_by, ?) " +
+                "WHERE allocation_run_id = ?",
+                approvedByUserId, runId);
+    }
+
+    private static Long toLong(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Number n) return n.longValue();
+        return Long.parseLong(obj.toString());
+    }
+
+    private static LocalDateTime toLocalDateTime(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof LocalDateTime ldt) return ldt;
+        if (obj instanceof java.sql.Timestamp ts) return ts.toLocalDateTime();
+        try {
+            return LocalDateTime.parse(obj.toString().replace(" ", "T"));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static LocalTime toLocalTime(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof LocalTime lt) return lt;
+        if (obj instanceof java.sql.Time t) return t.toLocalTime();
+        try {
+            return LocalTime.parse(obj.toString());
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -626,6 +947,73 @@ public class OfficerRepository {
                 return outcomes.size();
             }
         });
+
+        // Save detail rows into child table allocation_assignment_buses
+        try {
+            String queryAssignmentsSql = "SELECT allocation_assignment_id, trip_id FROM allocation_assignments WHERE allocation_run_id = ?";
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(queryAssignmentsSql, runId);
+            Map<Long, Long> tripToAssignmentId = new HashMap<>();
+            for (Map<String, Object> r : rows) {
+                tripToAssignmentId.put(((Number) r.get("trip_id")).longValue(),
+                        ((Number) r.get("allocation_assignment_id")).longValue());
+            }
+
+            List<Object[]> busRows = new ArrayList<>();
+            for (com.vaahansetu.allocation.AllocationModels.TripOutcome o : outcomes) {
+                Long assignmentId = tripToAssignmentId.get(o.tripId());
+                if (assignmentId == null) continue;
+
+                List<Long> bIds;
+                if (isBaseline) {
+                    bIds = (o.previousBusId() != null) ? List.of(o.previousBusId()) : List.of();
+                } else {
+                    bIds = (o.proposedBusIds() != null && !o.proposedBusIds().isEmpty())
+                            ? o.proposedBusIds()
+                            : (o.proposedBusId() != null ? List.of(o.proposedBusId()) : List.of());
+                }
+
+                for (Long bId : bIds) {
+                    if (bId != null) {
+                        busRows.add(new Object[]{assignmentId, bId});
+                    }
+                }
+            }
+
+            if (!busRows.isEmpty()) {
+                String insertBusesSql = "INSERT INTO allocation_assignment_buses (allocation_assignment_id, bus_id) " +
+                        "VALUES (?, ?) ON CONFLICT (allocation_assignment_id, bus_id) DO NOTHING";
+                try {
+                    jdbcTemplate.batchUpdate(insertBusesSql, busRows, busRows.size(), (ps, entry) -> {
+                        ps.setLong(1, (Long) entry[0]);
+                        ps.setLong(2, (Long) entry[1]);
+                    });
+                } catch (Exception e) {
+                    createAllocationAssignmentBusesTableIfNotExists();
+                    jdbcTemplate.batchUpdate(insertBusesSql, busRows, busRows.size(), (ps, entry) -> {
+                        ps.setLong(1, (Long) entry[0]);
+                        ps.setLong(2, (Long) entry[1]);
+                    });
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    public void createAllocationAssignmentBusesTableIfNotExists() {
+        try {
+            jdbcTemplate.execute("""
+                    CREATE TABLE IF NOT EXISTS allocation_assignment_buses (
+                        allocation_assignment_id BIGINT      NOT NULL REFERENCES allocation_assignments(allocation_assignment_id) ON DELETE CASCADE,
+                        bus_id                   BIGINT      NOT NULL REFERENCES buses(bus_id) ON DELETE RESTRICT,
+                        created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (allocation_assignment_id, bus_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_allocation_assignment_buses_bus ON allocation_assignment_buses (bus_id);
+                    DROP INDEX IF EXISTS uq_trip_one_active_assignment;
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_trip_bus_active_assignment ON trip_assignments (trip_id, bus_id) WHERE status = 'ACTIVE';
+                    """);
+        } catch (Exception ignored) {
+        }
     }
 
     public void insertSegmentResult(long runId, long routeId,
@@ -761,13 +1149,20 @@ public class OfficerRepository {
                        t.route_id              AS "routeId",
                        t.departure_time        AS "departureTime",
                        t.expected_arrival_time AS "expectedArrivalTime",
-                       ta.bus_id               AS "currentBusId",
-                       COALESCE(b.capacity, 0) AS "currentBusCapacity"
+                       cur.bus_id              AS "currentBusId",
+                       COALESCE(cur.capacity, 0) AS "currentBusCapacity"
                 FROM scheduled_trips t
                 JOIN routes r ON r.route_id = t.route_id AND r.is_active = TRUE
-                LEFT JOIN trip_assignments ta
-                    ON ta.trip_id = t.trip_id AND ta.status = 'ACTIVE'
-                LEFT JOIN buses b ON b.bus_id = ta.bus_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        MIN(ta2.bus_id) AS bus_id,
+                        COALESCE(SUM(b2.capacity), 0) AS capacity
+                    FROM trip_assignments ta2
+                    JOIN buses b2 ON b2.bus_id = ta2.bus_id
+                    WHERE ta2.trip_id = t.trip_id
+                      AND ta2.status = 'ACTIVE'
+                      AND b2.status = 'ACTIVE'
+                ) cur ON TRUE
                 WHERE t.status = 'SCHEDULED'
                   AND t.service_date = ?
                   AND t.departure_time >= ?

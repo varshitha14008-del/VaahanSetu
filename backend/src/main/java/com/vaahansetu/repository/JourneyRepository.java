@@ -23,8 +23,7 @@ public class JourneyRepository {
 
     public List<Map<String, Object>> findTodaysTrips(Long routeId, LocalDate serviceDate) {
         String sql = """
-                SELECT DISTINCT
-                       st.trip_id AS "tripId",
+                SELECT st.trip_id AS "tripId",
                        st.route_id AS "routeId",
                        st.service_date AS "serviceDate",
                        TO_CHAR(st.departure_time, 'HH24:MI') AS "departureTimeFormatted",
@@ -32,23 +31,28 @@ public class JourneyRepository {
                        st.departure_time AS "departureTime",
                        st.expected_arrival_time AS "expectedArrivalTime",
                        st.status,
-                       ta.bus_id AS "busId",
+                       b.bus_id AS "busId",
                        b.registration_number AS "registrationNumber",
                        b.capacity
                 FROM scheduled_trips st
-                LEFT JOIN trip_assignments ta
-                    ON ta.trip_id = st.trip_id
-                LEFT JOIN buses b
-                    ON b.bus_id = ta.bus_id
+                JOIN LATERAL (
+                    SELECT
+                        MIN(ta.bus_id) AS bus_id,
+                        STRING_AGG(b2.registration_number, ', ' ORDER BY b2.bus_id) AS registration_number,
+                        COALESCE(SUM(b2.capacity), 0) AS capacity
+                    FROM trip_assignments ta
+                    JOIN buses b2 ON b2.bus_id = ta.bus_id
+                    WHERE ta.trip_id = st.trip_id
+                      AND ta.status = 'ACTIVE'
+                      AND b2.status = 'ACTIVE'
+                ) b ON b.bus_id IS NOT NULL
                 WHERE st.route_id = ?
                   AND st.service_date = COALESCE(?,
                         (SELECT started_at::date FROM planning_sessions WHERE status = 'ACTIVE' ORDER BY started_at DESC LIMIT 1),
                         (SELECT MAX(service_date) FROM scheduled_trips WHERE route_id = ?),
                         (SELECT MAX(service_date) FROM scheduled_trips),
                         CURRENT_DATE)
-                  AND ta.status = 'ACTIVE'
                   AND st.status = 'SCHEDULED'
-                  AND b.status = 'ACTIVE'
                 ORDER BY st.departure_time
                 """;
 
@@ -58,6 +62,14 @@ public class JourneyRepository {
                 serviceDate,
                 routeId
         );
+    }
+
+    public List<Map<String, Object>> findDeparturesForRoute(Long routeId) {
+        return findTodaysTrips(routeId, null);
+    }
+
+    public List<Map<String, Object>> findDeparturesForRoute(Long routeId, LocalDate serviceDate) {
+        return findTodaysTrips(routeId, serviceDate);
     }
 
     // Find all trips for a route today (whether bus is allocated yet or not)

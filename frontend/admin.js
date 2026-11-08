@@ -608,25 +608,45 @@ if (runAllocationBtn) {
             }
             const tripsCount = document.getElementById('allocTripsCount');
             if (tripsCount) tripsCount.textContent = da.tripsConsidered ?? da.totalTripsEvaluated ?? proposal.assignments?.length ?? 0;
+            const peakDemandEl = document.getElementById('allocPeakDemand');
+            if (peakDemandEl) peakDemandEl.textContent = `${da.totalPeakDemand ?? 0} pax`;
             const totalDemand = document.getElementById('allocTotalDemand');
-            if (totalDemand) totalDemand.textContent = `${da.totalDemand ?? da.totalPeakDemand ?? 0} pax`;
+            if (totalDemand) {
+                const segs = da.totalDemandSegments ?? da.totalDemand ?? 0;
+                totalDemand.textContent = `${segs} pax-seg`;
+            }
             const baselineUnmet = document.getElementById('allocBaselineUnmet');
-            if (baselineUnmet) baselineUnmet.textContent = `${proposal.baselineUnmetDemand ?? da.baselineUnmetDemand ?? 0} pax`;
+            if (baselineUnmet) {
+                const bu = proposal.baselineUnmetDemand ?? da.baselineUnmetDemand ?? proposal.baselineMetrics?.unmet ?? 0;
+                baselineUnmet.textContent = `${bu} pax-seg`;
+            }
             const proposedUnmet = document.getElementById('allocProposedUnmet');
-            if (proposedUnmet) proposedUnmet.textContent = `${proposal.proposedUnmetDemand ?? da.proposedUnmetDemand ?? 0} pax`;
+            if (proposedUnmet) {
+                const pu = proposal.proposedUnmetDemand ?? da.proposedUnmetDemand ?? proposal.proposedMetrics?.unmet ?? 0;
+                proposedUnmet.textContent = `${pu} pax-seg`;
+            }
             const accommodated = document.getElementById('allocAccommodated');
-            if (accommodated) accommodated.textContent = `${da.accommodatedDemand ?? 0} pax`;
+            if (accommodated) {
+                const acc = da.accommodatedDemandSegments ?? da.accommodatedDemand ?? proposal.proposedMetrics?.accommodated ?? 0;
+                accommodated.textContent = `${acc} pax-seg`;
+            }
 
             // Section 2: Fleet Availability Cards
             const fa = proposal.fleetAvailability || {};
             const fleetTotal = document.getElementById('fleetTotalCount');
             if (fleetTotal) fleetTotal.textContent = fa.totalFleet ?? fa.totalFleetBuses ?? state.buses.length;
             const fleetAvail = document.getElementById('fleetAvailableCount');
-            const availCount = fa.busesEligible ?? fa.availableBuses ?? 0;
-            const assignCount = fa.busesAssigned ?? 0;
-            if (fleetAvail) fleetAvail.textContent = `${availCount} (${assignCount} assigned)`;
+            const eligCount = fa.busesEligible ?? proposal.busesConsidered ?? 0;
+            const assignCount = fa.busesAssigned ?? proposal.busesAssigned ?? 0;
+            if (fleetAvail) fleetAvail.textContent = `${assignCount} assigned (${eligCount} active)`;
             const fleetResting = document.getElementById('fleetRestingCount');
-            if (fleetResting) fleetResting.textContent = fa.busesUnassigned ?? fa.restingOrConstrainedBuses ?? 0;
+            const unassignedCount = fa.busesUnassigned ?? proposal.busesLeftUnassigned ?? 0;
+            const unavailCount = fa.busesUnavailable ?? ((fa.totalFleet || 0) - eligCount);
+            if (fleetResting) {
+                fleetResting.textContent = unavailCount > 0 
+                    ? `${unassignedCount} idle (${unavailCount} maintenance)` 
+                    : `${unassignedCount} idle`;
+            }
 
             // Section 3: Proposed Bus Assignments Table with Plain-English Explanations
             if (tbody) {
@@ -644,9 +664,13 @@ if (runAllocationBtn) {
 
                         const prevCap = a.baselineCapacity ?? a.previousCapacity ?? 0;
                         const propCap = a.proposedCapacity ?? 0;
-                        const peakD = a.peakDemand ?? a.demand ?? 0;
+                        let peakD = a.peakDemand ?? a.demand ?? 0;
+                        if (!peakD && a.reason) {
+                            const m = a.reason.match(/(?:for|load of|is)\s+(\d+)\s+peak\s+passengers/i) || a.reason.match(/Peak demand is\s+(\d+)\s+passengers/i);
+                            if (m) peakD = parseInt(m[1], 10);
+                        }
 
-                        const occPct = propCap > 0 ? Math.round((peakD / propCap) * 100) : 0;
+                        const occPct = a.occupancy ?? (propCap > 0 ? Math.round((peakD / propCap) * 100) : 0);
                         let occBadge = '';
                         if (occPct > 100) {
                             occBadge = `<span class="status-badge badge-resting">${occPct}% (Over)</span>`;

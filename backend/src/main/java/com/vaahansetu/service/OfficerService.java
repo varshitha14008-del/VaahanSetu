@@ -270,24 +270,71 @@ public class OfficerService {
         response.put("busesConsidered", result.busesConsidered());
         response.put("busesAssigned",   result.busesAssigned());
         response.put("busesLeftUnassigned", result.busesLeftUnassigned());
+        int totalPeakDemand = 0;
+        Map<Long, com.vaahansetu.allocation.AllocationModels.TripOutcome> outcomeByTrip = new HashMap<>();
+        for (com.vaahansetu.allocation.AllocationModels.TripOutcome o : result.outcomes()) {
+            outcomeByTrip.put(o.tripId(), o);
+            totalPeakDemand += o.peakDemand();
+        }
+
+        List<Map<String, Object>> assignments = repo.findAllocationAssignments(proposedRunId);
+        Map<Long, com.vaahansetu.allocation.AllocationModels.Bus> busMap = new HashMap<>();
+        for (com.vaahansetu.allocation.AllocationModels.Bus b : input.buses()) {
+            busMap.put(b.id(), b);
+        }
+        for (Map<String, Object> a : assignments) {
+            long tripId = toLong(a.get("tripId"));
+            com.vaahansetu.allocation.AllocationModels.TripOutcome o = outcomeByTrip.get(tripId);
+            if (o != null) {
+                if (o.peakDemand() > 0 || a.get("peakDemand") == null || toInt(a.get("peakDemand")) == 0) {
+                    a.put("peakDemand", o.peakDemand());
+                }
+                if (o.proposedBusIds() != null && o.proposedBusIds().size() > 1) {
+                    List<String> regs = new ArrayList<>();
+                    int totalCap = 0;
+                    for (Long bId : o.proposedBusIds()) {
+                        com.vaahansetu.allocation.AllocationModels.Bus b = busMap.get(bId);
+                        if (b != null) {
+                            regs.add(b.regNo());
+                            totalCap += b.capacity();
+                        }
+                    }
+                    if (!regs.isEmpty()) {
+                        a.put("proposedBusRegistration", String.join(", ", regs));
+                        a.put("proposedCapacity", totalCap);
+                    }
+                }
+                int propCap = toInt(a.get("proposedCapacity"));
+                int peakD = toInt(a.get("peakDemand"));
+                int occ = propCap > 0 ? (int) Math.round((peakD * 100.0) / propCap) : 0;
+                a.put("occupancy", occ);
+            }
+        }
+
         response.put("tripOutcomes", outcomesToMaps(result.outcomes()));
-        response.put("assignments", repo.findAllocationAssignments(proposedRunId));
+        response.put("assignments", assignments);
         response.put("baselineSegments", repo.findSegmentResults(baselineRunId));
         response.put("proposedSegments", repo.findSegmentResults(proposedRunId));
 
         // Presentation-ready Demand Analysis & Fleet Availability Summaries
         Map<String, Object> demandAnalysis = new LinkedHashMap<>();
         demandAnalysis.put("totalDemand", result.afterTotal().demand());
+        demandAnalysis.put("totalDemandSegments", result.afterTotal().demand());
+        demandAnalysis.put("totalPeakDemand", totalPeakDemand);
         demandAnalysis.put("accommodatedDemand", result.afterTotal().accommodated());
+        demandAnalysis.put("accommodatedDemandSegments", result.afterTotal().accommodated());
         demandAnalysis.put("unmetDemand", result.afterTotal().unmet());
+        demandAnalysis.put("unmetDemandSegments", result.afterTotal().unmet());
         demandAnalysis.put("routesConsidered", input.routes().size());
         demandAnalysis.put("tripsConsidered", input.trips().size());
 
+        int totalFleetCount = repo.findAllBuses().size();
         Map<String, Object> fleetAvailability = new LinkedHashMap<>();
-        fleetAvailability.put("totalFleet", repo.findAllBuses().size());
+        fleetAvailability.put("totalFleet", totalFleetCount);
         fleetAvailability.put("busesEligible", result.busesConsidered());
         fleetAvailability.put("busesAssigned", result.busesAssigned());
         fleetAvailability.put("busesUnassigned", result.busesLeftUnassigned());
+        fleetAvailability.put("busesUnavailable", totalFleetCount - result.busesConsidered());
 
         response.put("demandAnalysis", demandAnalysis);
         response.put("fleetAvailability", fleetAvailability);
@@ -579,6 +626,9 @@ public class OfficerService {
             m.put("proposedBusId", o.proposedBusId());
             m.put("type",          o.type());
             m.put("reason",        o.reason());
+            m.put("proposedBusIds", o.proposedBusIds());
+            m.put("peakDemand",    o.peakDemand());
+            m.put("unmetDemand",   o.unmetDemand());
             list.add(m);
         }
         return list;

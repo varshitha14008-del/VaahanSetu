@@ -40,14 +40,24 @@ public final class AllocationModels {
     /** All figures are passenger-segments summed across all segments/trips. */
     public record Metrics(int demand, int capacity, int accommodated, int unmet, int unused) {}
 
-    public record SegmentRow(long routeId, long startStopId, long endStopId, int demand, int capacity) {
-        public int accommodated() { return Math.min(demand, capacity); }
-        public int unmet() { return Math.max(0, demand - capacity); }
-        public int unused() { return Math.max(0, capacity - demand); }
+    public record SegmentRow(long routeId, long startStopId, long endStopId,
+                             int demand, int capacity, int accommodated, int unmet, int unused) {
+        public SegmentRow(long routeId, long startStopId, long endStopId, int demand, int capacity) {
+            this(routeId, startStopId, endStopId, demand, capacity,
+                    Math.min(demand, capacity),
+                    Math.max(0, demand - capacity),
+                    Math.max(0, capacity - demand));
+        }
     }
 
     public record TripOutcome(long tripId, long routeId, Long previousBusId, Long proposedBusId,
-                              String type, String reason) {}
+                              String type, String reason, List<Long> proposedBusIds, int peakDemand, int unmetDemand) {
+        public TripOutcome(long tripId, long routeId, Long previousBusId, Long proposedBusId,
+                           String type, String reason) {
+            this(tripId, routeId, previousBusId, proposedBusId, type, reason,
+                    proposedBusId != null ? List.of(proposedBusId) : List.of(), 0, 0);
+        }
+    }
 
     public record RouteReport(long routeId, String code, String name,
                               Metrics before, Metrics after, List<Long> assignedBusIds) {}
@@ -60,4 +70,3 @@ public final class AllocationModels {
                          List<RouteReport> routes, List<BusReport> buses, List<TripOutcome> outcomes,
                          List<SegmentRow> beforeSegments, List<SegmentRow> afterSegments) {}
 }
-
