@@ -523,19 +523,27 @@ async function fetchTrips() {
 
         tbody.innerHTML = trips.map(t => {
             const busReg = t.currentBusRegistration || t.assignedBusNumber;
-            const busCap = t.currentBusCapacity || t.busCapacity;
-            const assignedBus = busReg ? `Bus #${busReg}` : '<span class="text-muted">Unassigned</span>';
-            const cap = busCap ? `${busCap} seats` : '-';
+            const busCap = (t.currentBusCapacity != null) ? t.currentBusCapacity : (t.busCapacity != null ? t.busCapacity : 0);
+            const assignedBus = busReg
+                ? (busReg.includes(',') ? `Buses: ${busReg}` : `Bus #${busReg}`)
+                : '<span class="text-muted">Unassigned</span>';
+            const cap = busCap > 0 ? `${busCap} seats` : '-';
             const depLabel = t.departureTime ? (t.departureTime.length > 16 ? t.departureTime.substring(11, 16) : t.departureTime) : '-';
             const arrLabel = t.expectedArrivalTime ? (t.expectedArrivalTime.length > 16 ? t.expectedArrivalTime.substring(11, 16) : t.expectedArrivalTime) : (t.arrivalTime || '-');
-            const booked = t.bookedPassengerCount != null ? t.bookedPassengerCount : (t.demand || 0);
-            const inq = t.activeInquiryCount != null ? t.activeInquiryCount : 0;
-            const totalD = t.totalDemand != null ? t.totalDemand : (booked + inq);
-            const peakDemand = t.peakSegmentDemand != null ? t.peakSegmentDemand : (t.demand || 0);
+
+            const booked = t.bookedPassengerCount != null ? t.bookedPassengerCount : 0;
+            const peakDemand = t.effectivePeakDemand != null ? t.effectivePeakDemand : (t.peakSegmentDemand != null ? t.peakSegmentDemand : (t.demand || 0));
+            const adj = t.administrativeAdjustment != null ? t.administrativeAdjustment : 0;
+            const adjText = adj !== 0 ? (adj > 0 ? `+${adj}` : `${adj}`) : '0';
+
+            const hasAssignedCap = busCap > 0 && busReg;
+            const occ = hasAssignedCap ? Math.round((peakDemand / busCap) * 100) : null;
 
             let demandBadge = '';
-            if (busCap && busCap > 0) {
-                const occ = Math.round((booked / busCap) * 100);
+            let primaryDemandText = '';
+
+            if (hasAssignedCap) {
+                primaryDemandText = `${peakDemand} / ${busCap} passengers — ${occ}%`;
                 if (occ > 100) {
                     demandBadge = `<span class="status-badge badge-resting" style="margin-left: 6px;">Overcap (${occ}%)</span>`;
                 } else if (occ >= 80) {
@@ -543,10 +551,17 @@ async function fetchTrips() {
                 } else {
                     demandBadge = `<span class="status-badge badge-active" style="margin-left: 6px;">${occ}%</span>`;
                 }
+            } else {
+                primaryDemandText = `${peakDemand} pax — Unassigned`;
+                demandBadge = `<span class="status-badge badge-resting" style="margin-left: 6px;">No Bus</span>`;
             }
-            const inqText = inq > 0 ? ` <span style="font-size:12px; color:#64748b;">(+${inq} inq)</span>` : '';
-            const peakInfo = `<div style="font-size:11px; color:#64748b; font-weight:normal;">Peak Seg: ${peakDemand} pax</div>`;
-            const demandDisplay = `<div><strong>${booked} booked</strong>${inqText}${demandBadge}</div>${peakInfo}`;
+
+            const demandBreakdown = `<div style="font-size:11px; color:#64748b; margin-top:2px;">` +
+                `<span>Trip Bookings: <strong>${booked}</strong></span> &bull; ` +
+                `<span>Peak Adj: <strong>${adjText}</strong></span> &bull; ` +
+                `<span>Peak Seg: <strong>${peakDemand} pax</strong></span>` +
+                `</div>`;
+            const demandDisplay = `<div><strong>${primaryDemandText}</strong>${demandBadge}</div>${demandBreakdown}`;
 
             return `
                 <tr>

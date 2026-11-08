@@ -141,7 +141,26 @@ public class OfficerService {
 
     public List<Map<String, Object>> getTrips(LocalDate serviceDate) {
         Long sessionId = repo.findActiveSessionId();
-        return repo.findScheduledTrips(sessionId, serviceDate == null ? repo.findActiveSessionDate() : serviceDate);
+        List<Map<String, Object>> trips = repo.findScheduledTrips(sessionId, serviceDate == null ? repo.findActiveSessionDate() : serviceDate);
+        List<Map<String, Object>> enriched = new ArrayList<>();
+        for (Map<String, Object> trip : trips) {
+            Map<String, Object> m = new LinkedHashMap<>(trip);
+            int peakDemand = toInt(m.get("peakSegmentDemand"));
+            int busCap = toInt(m.get("currentBusCapacity"));
+            int adj = toInt(m.get("administrativeAdjustment"));
+            int peakBookings = toInt(m.get("peakSegmentBookings"));
+            m.put("administrativeAdjustment", adj);
+            m.put("peakSegmentBookings", peakBookings);
+            m.put("effectivePeakDemand", peakDemand);
+            m.put("demand", peakDemand);
+            if (busCap > 0) {
+                m.put("utilizationPercent", (int) Math.round((peakDemand * 100.0) / busCap));
+            } else {
+                m.put("utilizationPercent", null);
+            }
+            enriched.add(m);
+        }
+        return enriched;
     }
 
     // ----------------------------------------------------------------
