@@ -1,8 +1,12 @@
 // VaahanSetu Administrator Portal Logic
+const isLocalEnv = !window.location.hostname ||
+    window.location.protocol === 'file:' ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '0.0.0.0';
+
 const API_BASE = window.VAAHAN_API_URL || (
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-        ? "http://localhost:8080/api"
-        : `${window.location.origin}/api`
+    isLocalEnv ? "http://localhost:8080/api" : `${window.location.origin}/api`
 );
 
 const state = {
@@ -37,7 +41,7 @@ function checkAuth() {
     const adminDashboard = document.getElementById('adminDashboard');
     const logoutBtn = document.getElementById('logoutBtn');
 
-    if (!state.token || !state.user) {
+    if (!state.token || !state.user || (state.user.role && state.user.role.toUpperCase() !== 'ADMIN')) {
         if (loginSection) loginSection.hidden = false;
         if (adminDashboard) adminDashboard.hidden = true;
         if (logoutBtn) logoutBtn.hidden = true;
@@ -105,12 +109,17 @@ if (adminLoginForm) {
                 throw new Error(data.message || `Login failed (HTTP ${res.status})`);
             }
 
+            const role = (data.role || '').toUpperCase();
+            if (role && role !== 'ADMIN') {
+                throw new Error('Access denied: Administrator privileges required.');
+            }
+
             const token = data.token || data.accessToken || data.jwt;
             const user = {
                 userId: data.userId,
                 username: data.username || username,
                 fullName: data.fullName,
-                role: data.role || 'ADMIN'
+                role: role || 'ADMIN'
             };
 
             sessionStorage.setItem('vaahan_auth_token', token);
@@ -122,7 +131,10 @@ if (adminLoginForm) {
             showDashboard();
         } catch (err) {
             if (feedback) {
-                feedback.textContent = `Login failed: ${err.message}`;
+                const msg = err.message === 'Failed to fetch'
+                    ? `Unable to connect to backend server at ${API_BASE}. Please ensure the backend is running.`
+                    : `Login failed: ${err.message}`;
+                feedback.textContent = msg;
                 feedback.className = 'feedback-msg text-danger';
             }
         } finally {
