@@ -10,8 +10,9 @@ WORKDIR /app
 COPY --from=build /app/target/backend-0.0.1-SNAPSHOT.jar app.jar
 
 ENV PORT=8080
+ENV SERVER_PORT=8080
 ENV SPRING_PROFILES_ACTIVE=default
-ENV JAVA_TOOL_OPTIONS="-Duser.timezone=UTC -Xms256m -Xmx512m"
+ENV JAVA_TOOL_OPTIONS="-Duser.timezone=UTC -Xms64m -Xmx320m -XX:+UseSerialGC -Xss512k"
 
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
