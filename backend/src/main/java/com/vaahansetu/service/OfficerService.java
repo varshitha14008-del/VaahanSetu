@@ -584,16 +584,17 @@ public class OfficerService {
             }
         }
 
-        // Commitments (excluding trips being reallocated)
+        // Commitments (ALL existing active bus assignments, including trips being reallocated)
+        // We must respect ALL existing commitments — even on trips being reallocated — because
+        // the bus is physically occupied during that time slot. The engine can still reassign
+        // a bus to a DIFFERENT trip, but only if the time slots don't overlap.
+        // Previously, this code skipped commitments on reallocated trips, causing the engine
+        // to think a bus was "free" when it was actually still serving another trip at the
+        // same time. The approval step caught this conflict and rejected the proposal.
         List<Map<String, Object>> commitmentRows = repo.findEngineCommitments(serviceDate);
-        Set<Long> reallocatedTripIds = new HashSet<>();
-        for (com.vaahansetu.allocation.AllocationModels.Trip t : trips) {
-            reallocatedTripIds.add(t.id());
-        }
         List<com.vaahansetu.allocation.AllocationModels.Commitment> commitments = new ArrayList<>();
         for (Map<String, Object> cr : commitmentRows) {
             long tripId = toLong(cr.get("tripId"));
-            if (reallocatedTripIds.contains(tripId)) continue;
             commitments.add(new com.vaahansetu.allocation.AllocationModels.Commitment(
                     toLong(cr.get("busId")),
                     tripId,
